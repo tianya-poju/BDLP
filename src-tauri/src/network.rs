@@ -8,8 +8,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{Emitter, Manager};
-pub(crate) fn cfg() -> Value {
-    serde_json::from_str(include_str!("protocol-config.json")).unwrap()
+pub(crate) fn cfg() -> &'static crate::protocol_config::ProtocolConfig {
+    crate::protocol_config::get()
 }
 fn md5(s: &str) -> String {
     format!("{:x}", Md5::digest(s.as_bytes()))
@@ -42,9 +42,9 @@ fn sign(p: &BTreeMap<String, String>, protected: bool, login: bool) -> String {
         .map(|(k, v)| format!("{k}{v}"))
         .collect::<String>();
     if protected {
-        md5(&format!("{}{body}", c["SALT_P"].as_str().unwrap()))
+        md5(&format!("{}{body}", &c.salt_p))
     } else {
-        md5(&format!("{body}{}", c["SALT_N"].as_str().unwrap()))
+        md5(&format!("{body}{}", &c.salt_n))
     }
 }
 pub(crate) fn text<T: serde::Serialize + ?Sized>(v: &T, key: &str) -> String {
@@ -121,11 +121,11 @@ fn encode_form(
         );
     if login {
         p.remove("token");
-        let pair = &c["T15"][n as usize % 15];
+        let pair = &c.t15[n as usize % 15];
         let lp = encrypt(
-            &format!("{}{}", text(&c, "UMID"), md5(&n.to_string())),
-            pair[0].as_str().unwrap(),
-            pair[1].as_str().unwrap(),
+            &format!("{}{}", c.umid.clone(), md5(&n.to_string())),
+            &pair[0],
+            &pair[1],
         )?;
         p.insert("lp47".into(), lp + "\n");
     }
@@ -137,20 +137,16 @@ fn encode_form(
             "key".to_string(),
             encrypt(
                 &body,
-                c[if endpoint == "Run/stopFreeRunV220" {
-                    "KEY_TRK"
+                if endpoint == "Run/stopFreeRunV220" {
+                    &c.key_trk
                 } else {
-                    "KEY_NG"
-                }]
-                .as_str()
-                .unwrap(),
-                c[if endpoint == "Run/stopFreeRunV220" {
-                    "IV_TRK"
+                    &c.key_ng
+                },
+                if endpoint == "Run/stopFreeRunV220" {
+                    &c.iv_trk
                 } else {
-                    "IV_NG"
-                }]
-                .as_str()
-                .unwrap(),
+                    &c.iv_ng
+                },
             )?,
         )])
     } else {
@@ -202,8 +198,8 @@ pub(crate) async fn call_with_clock(
     let a = &d.account;
     let dev = crate::store::device_view(d);
     let mut p: BTreeMap<String, String> = [
-        ("version", text(&c, "version")),
-        ("version_name", text(&c, "version_name")),
+        ("version", c.version.clone()),
+        ("version_name", c.version_name.clone()),
         ("mobileModel", text(&dev, "model")),
         ("mobileDeviceId", d.device_id.clone()),
         ("mobileOsVersion", text(&dev, "osVersion")),
@@ -267,18 +263,8 @@ pub(crate) async fn call_with_clock(
     let mut v: Value = serde_json::from_slice(&bytes).map_err(|_| "服务返回的不是有效 JSON")?;
     if v["is_encrypt"].as_i64() == Some(1) || v["is_encrypt"].as_str() == Some("1") {
         let raw = v["data"].as_str().ok_or("加密响应格式无效")?;
-        let dec = decrypt(
-            raw,
-            c["KEY_TRK"].as_str().unwrap(),
-            c["IV_TRK"].as_str().unwrap(),
-        )
-        .or_else(|_| {
-            decrypt(
-                raw,
-                c["KEY_NG"].as_str().unwrap(),
-                c["IV_NG"].as_str().unwrap(),
-            )
-        })?;
+        let dec =
+            decrypt(raw, &c.key_trk, &c.iv_trk).or_else(|_| decrypt(raw, &c.key_ng, &c.iv_ng))?;
         v["data"] = serde_json::from_str(&dec).map_err(|_| "解密响应不是 JSON")?;
     }
     checked(v)
@@ -295,10 +281,8 @@ pub(crate) async fn finish(
     crate::store::apply_pending(&mut d);
     let c = cfg();
     let n = 100000 + (uuid::Uuid::new_v4().as_u128() % 900000) as u32;
-    let pair = &c["Z8"][n as usize % 10];
-    let inner = |s: &str| {
-        encrypt(s, pair[0].as_str().unwrap(), pair[1].as_str().unwrap()).map(|s| s + "\n")
-    };
+    let pair = &c.z8[n as usize % 10];
+    let inner = |s: &str| encrypt(s, &pair[0], &pair[1]).map(|s| s + "\n");
     let extra = BTreeMap::from([
         ("openid".into(), inner(&openid)?),
         ("accesstoken".into(), inner(&token)?),
@@ -362,11 +346,7 @@ pub async fn qq_login_start(app: tauri::AppHandle) -> Result<(), crate::error::A
     if app.get_webview_window("qq-login").is_some() {
         return Err("QQ 授权窗口已打开".into());
     }
-    let url: url::Url = cfg()["qq_url"]
-        .as_str()
-        .ok_or("缺少授权地址")?
-        .parse()
-        .map_err(|_| "授权地址无效")?;
+    let url: url::Url = cfg().qq_url.parse().map_err(|_| "授权地址无效")?;
     let handle = app.clone();
     let once = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     tauri::WebviewWindowBuilder::new(&app, "qq-login", tauri::WebviewUrl::External(url))
@@ -558,20 +538,10 @@ mod tests {
         assert_eq!(sign(&p, false, false), v["normal"]);
         assert_eq!(sign(&p, true, false), v["protected"]);
         let c = cfg();
-        let encrypted = encrypt(
-            "协议测试",
-            c["KEY_NG"].as_str().unwrap(),
-            c["IV_NG"].as_str().unwrap(),
-        )
-        .unwrap();
+        let encrypted = encrypt("协议测试", &c.key_ng, &c.iv_ng).unwrap();
         assert_eq!(encrypted, v["aes"]);
         assert_eq!(
-            decrypt(
-                &encrypted,
-                c["KEY_NG"].as_str().unwrap(),
-                c["IV_NG"].as_str().unwrap()
-            )
-            .unwrap(),
+            decrypt(&encrypted, &c.key_ng, &c.iv_ng).unwrap(),
             "协议测试"
         );
     }
