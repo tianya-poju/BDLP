@@ -1,0 +1,14 @@
+/map-secrets.local.json
+/node_modules/
+/build/
+/src-tauri/target/
+
+/.playwright-cli/
+/output/
+
+/data/
+**/*.dpapi
+*.log
+/README*
+/reference*/
+/dist/
