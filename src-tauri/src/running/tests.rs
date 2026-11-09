@@ -26,8 +26,6 @@ mod tests {
             id: JobId("test".into()),
             data,
             mode: "free".into(),
-            cancel: AtomicBool::new(false),
-            busy: AtomicBool::new(false),
             state: Mutex::new(Progress {
                 status: TaskStatus::Running,
                 rules: Some(json!({"game_id":"z","term_id":"t"})),
@@ -37,6 +35,109 @@ mod tests {
                 ..Default::default()
             }),
         }
+    }
+    #[test]
+    fn cancelled_step_blocks_other_jobs_until_inflight_step_exits() {
+        let j = job();
+        let step = j.step().unwrap();
+        assert!(j.step().is_err());
+        j.cancel().unwrap();
+        assert!(j.blocking());
+        assert!(j.progress().submission_ready().is_err());
+        assert!(j.step().is_err());
+        drop(step);
+        assert!(!j.blocking());
+    }
+    #[test]
+    fn cancellation_and_submission_share_one_atomic_transition() {
+        let j = Arc::new(job());
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+        let a = j.clone();
+        let b = barrier.clone();
+        let submit = std::thread::spawn(move || {
+            b.wait();
+            let mut state = a.progress();
+            if state.submission_ready().is_ok() {
+                state.status = TaskStatus::Submitting;
+                true
+            } else {
+                false
+            }
+        });
+        let a = j.clone();
+        let b = barrier.clone();
+        let cancel = std::thread::spawn(move || {
+            b.wait();
+            a.cancel().is_ok()
+        });
+        barrier.wait();
+        let submitted = submit.join().unwrap();
+        let cancelled = cancel.join().unwrap();
+        assert_ne!(submitted, cancelled);
+        let state = j.progress();
+        assert!(matches!(
+            state.status,
+            TaskStatus::Submitting | TaskStatus::Cancelled
+        ));
+        assert!(state.submission_ready().is_err());
+    }
+    #[test]
+    fn poison_stops_task_but_does_not_release_inflight_execution_or_resend() {
+        for submitted in [false, true] {
+            let j = Arc::new(job());
+            let runs = Runs(Mutex::new(VecDeque::from([j.clone()])));
+            j.progress().executing = true;
+            let execution = state::Execution(j.clone());
+            if submitted {
+                j.progress().status = TaskStatus::Submitting;
+            }
+            let step = j.step().unwrap();
+            assert!(std::panic::catch_unwind(|| {
+                let _state = j.state.lock().unwrap();
+                panic!("synthetic poisoned task");
+            })
+            .is_err());
+            let status = if submitted {
+                TaskStatus::Unknown
+            } else {
+                TaskStatus::Failed
+            };
+            assert_eq!(j.progress().status, status);
+            assert!(j.progress().faulted);
+            assert!(!j.state.is_poisoned());
+            assert!(j.blocking());
+            assert!(ensure_idle(&runs).is_err());
+            assert!(j.step().is_err());
+            drop(step);
+            assert!(j.blocking());
+            drop(execution);
+            assert!(!j.blocking());
+            assert!(ensure_idle(&runs).is_ok());
+            assert_eq!(j.progress().status, status);
+            assert!(j.progress().submission_ready().is_err());
+        }
+    }
+    #[test]
+    fn step_unwind_and_executor_drop_release_occupancy_without_reviving_task() {
+        let j = Arc::new(job());
+        j.progress().executing = true;
+        let execution = state::Execution(j.clone());
+        assert!(std::panic::catch_unwind(|| {
+            let _step = j.step().unwrap();
+            panic!("synthetic step failure");
+        })
+        .is_err());
+        assert!(!j.progress().busy);
+        assert_eq!(j.progress().status, TaskStatus::Failed);
+        assert!(j.blocking());
+        drop(execution);
+        assert!(!j.blocking());
+        let j = Arc::new(job());
+        j.progress().executing = true;
+        let execution = state::Execution(j.clone());
+        j.progress().status = TaskStatus::Done;
+        drop(execution);
+        assert_eq!(j.progress().status, TaskStatus::Done);
     }
     #[test]
     fn record_signature_matches_supplied_exe_including_i32_wrapping() {
@@ -60,12 +161,7 @@ mod tests {
         let enc = encrypted(&v.to_string()).unwrap();
         let c = network::cfg();
         assert_eq!(
-            network::decrypt(
-                std::str::from_utf8(&enc).unwrap(),
-                c["KEY_TRK"].as_str().unwrap(),
-                c["IV_TRK"].as_str().unwrap()
-            )
-            .unwrap(),
+            network::decrypt(std::str::from_utf8(&enc).unwrap(), &c.key_trk, &c.iv_trk).unwrap(),
             v.to_string()
         );
     }
@@ -80,6 +176,17 @@ mod tests {
         assert!(validate_points(&p).is_err());
         assert!(validate_sensor("[]").is_err());
         assert!(validate_sensor("not json").is_err());
+    }
+    #[test]
+    fn same_position_with_later_time_is_valid_but_equal_time_is_not() {
+        let mut p = points();
+        p[1].lat = p[0].lat;
+        p[1].lng = p[0].lng;
+        assert!(validate_points(&p).is_ok());
+        p[1].t = p[0].t;
+        assert!(validate_points(&p).is_err());
+        p[1].t = -1.;
+        assert!(validate_points(&p).is_err());
     }
     #[test]
     fn step_info_sums_exactly_to_total() {
@@ -126,7 +233,7 @@ mod tests {
         store.update(|d| d.account.uid = "other".into()).unwrap();
         assert!(guard(&j, &store).is_err());
         store.update(|d| *d = j.data.clone()).unwrap();
-        j.cancel.store(true, Ordering::SeqCst);
+        j.progress().cancelled = true;
         assert!(guard(&j, &store).is_err());
     }
     #[test]
