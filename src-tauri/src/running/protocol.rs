@@ -35,12 +35,7 @@ pub(super) fn track_json(points: &[Point]) -> Value {
 }
 pub(super) fn encrypted(value: &str) -> Result<Vec<u8>, crate::error::ApiError> {
     let c = network::cfg();
-    Ok(network::encrypt(
-        value,
-        c["KEY_TRK"].as_str().unwrap(),
-        c["IV_TRK"].as_str().unwrap(),
-    )?
-    .into_bytes())
+    Ok(network::encrypt(value, &c.key_trk, &c.iv_trk)?.into_bytes())
 }
 pub(super) fn key(kind: &str, ext: &str) -> String {
     let day = (now() + 28800) / 86400;
@@ -73,7 +68,11 @@ pub(super) async fn job_call(
     extra: BTreeMap<String, String>,
     nonce: Option<u32>,
 ) -> Result<Value, crate::error::ApiError> {
-    let clock = job.state.lock().map_err(|_| "任务不可用")?.clock;
+    let clock = {
+        let state = job.progress();
+        state.check()?;
+        state.clock
+    };
     network::call_with_clock(&job.data, endpoint, extra, nonce, clock).await
 }
 pub(super) async fn upload(
@@ -141,9 +140,7 @@ pub(super) fn record_str(data: &Data, time: &str) -> Result<String, crate::error
         .map_err(|_| "账号编号无效")?;
     let sid = data.school_id.parse::<i64>().map_err(|_| "学校编号无效")?;
     let c = network::cfg();
-    let w = c["W8"][uid.rem_euclid(10) as usize]
-        .as_str()
-        .ok_or("缺少提交协议参数")?;
+    let w = &c.w8[uid.rem_euclid(10) as usize];
     let sum = (sid as i32).wrapping_add(uid as i32);
     Ok(format!(
         "{:x}",
@@ -210,12 +207,12 @@ pub(super) async fn run_action_inner(
         if msg.len() > 1500 {
             return Err("日志过长".into());
         }
-        let mut s = j.state.lock().map_err(|_| "任务不可用")?;
+        let mut s = j.progress();
         s.push_log(msg);
         return Ok(json!({"ok":true}));
     }
     if action == "fail" {
-        let mut s = j.state.lock().map_err(|_| "任务不可用")?;
+        let mut s = j.progress();
         if s.status != TaskStatus::Done && s.status != TaskStatus::Cancelled {
             s.status = if matches!(
                 s.status,
@@ -229,13 +226,10 @@ pub(super) async fn run_action_inner(
         }
         return Ok(json!({"ok":true}));
     }
-    if j.busy.swap(true, Ordering::SeqCst) {
-        return Err("上一任务步骤仍在执行".into());
-    }
-    let _busy = Busy(&j.busy);
+    let _step = j.step()?;
     guard(&j, &store)?;
     {
-        let s = j.state.lock().map_err(|_| "任务不可用")?;
+        let s = j.progress();
         if !active(&s.status) {
             return Err("任务已结束".into());
         }
@@ -260,11 +254,11 @@ pub(super) async fn run_action_inner(
             if j.mode == "campus" && text(&r["data"], "game_id") != data.zone.id.clone() {
                 return Err("服务端跑区已变化，请重新选择跑区".into());
             }
-            j.state.lock().unwrap().rules = Some(r["data"].clone());
+            j.progress().rules = Some(r["data"].clone());
             r
         }
         "timestamp" => {
-            let rules = j.state.lock().unwrap().rules.clone().unwrap();
+            let rules = j.progress().rules.clone().ok_or("学校规则未加载")?;
             let r = job_call(
                 &j,
                 "Run/getTimestampV278",
@@ -276,7 +270,7 @@ pub(super) async fn run_action_inner(
             if server <= 0 || (server - now()).abs() >= 86400 {
                 return Err("服务端时间无效，请检查系统时钟".into());
             }
-            let mut s = j.state.lock().unwrap();
+            let mut s = j.progress();
             s.clock = server - now();
             s.time_str = text(&r["data"], "str");
             if s.time_str.is_empty() {
@@ -304,7 +298,7 @@ pub(super) async fn run_action_inner(
             if !lat.is_finite() || !lng.is_finite() || lat.abs() > 85. || lng.abs() > 180. {
                 return Err("心跳坐标无效".into());
             }
-            let rules = j.state.lock().unwrap().rules.clone().unwrap();
+            let rules = j.progress().rules.clone().ok_or("学校规则未加载")?;
             job_call(&j,"Run/setRunLocationRecord",map(json!({"latitude":format!("{lat:.5}"),"longitude":format!("{lng:.5}"),"game_id":text(&rules,"game_id"),"point_ids":text(&args,"pointIds")})),None).await?
         }
         "upload_track" | "replace_track" => {
@@ -312,7 +306,7 @@ pub(super) async fn run_action_inner(
                 serde_json::from_value(args["points"].clone()).map_err(|_| "轨迹格式无效")?;
             validate_points(&points)?;
             let k = if action == "replace_track" {
-                let k = j.state.lock().unwrap().track_key.clone();
+                let k = j.progress().track_key.clone();
                 if k.is_empty() {
                     return Err("未找到待更新轨迹".into());
                 }
@@ -348,7 +342,7 @@ pub(super) async fn run_action_inner(
                     upload(&j, &img, bytes, "image/png").await?;
                 }
             }
-            let mut s = j.state.lock().unwrap();
+            let mut s = j.progress();
             s.track_key = k.clone();
             s.points = points;
             if !img.is_empty() {
@@ -361,7 +355,7 @@ pub(super) async fn run_action_inner(
             validate_sensor(&raw)?;
             let k = key("file/run_gyroscope", "txt");
             upload(&j, &k, encrypted(&raw)?, "text/plain").await?;
-            j.state.lock().unwrap().sensor_key = k.clone();
+            j.progress().sensor_key = k.clone();
             json!({"key":k})
         }
         "face" => {
@@ -405,7 +399,7 @@ pub(super) async fn run_action_inner(
                 if mime == "image/jpeg" { "jpg" } else { "png" },
             );
             upload(&j, &k, bytes.clone(), mime).await?;
-            j.state.lock().unwrap().capture_key = k.clone();
+            j.progress().capture_key = k.clone();
             let mut miss = Value::Null;
             if args["isCaptureZone"] == true {
                 let r=job_call(&j,"Run2/getCaptureStatus",map(json!({"start_time":args["startTime"],"distance":text(&args,"distance"),"game_id":text(&args,"gameId"),"point_ids":args["pointIds"].as_array().map(|a|a.iter().map(Value::to_string).collect::<Vec<_>>().join(",")).unwrap_or_default()})),None).await?;
@@ -420,10 +414,8 @@ pub(super) async fn run_action_inner(
             let p = submit_fields(&j, &args)?;
             guard(&j, &store)?;
             {
-                let mut s = j.state.lock().unwrap();
-                if s.status != TaskStatus::Running {
-                    return Err("提交已发出，不能重复发送".into());
-                }
+                let mut s = j.progress();
+                s.submission_ready()?;
                 store.try_update(|v| {
                     if !same(v, data) {
                         return Err("账号已变化，未提交".into());
@@ -448,7 +440,8 @@ pub(super) async fn run_action_inner(
             };
             match job_call(&j, endpoint, p, None).await {
                 Ok(r) => {
-                    let mut s = j.state.lock().unwrap();
+                    let mut s = j.progress();
+                    s.check()?;
                     s.submit = Some(r.clone());
                     s.status = TaskStatus::Submitted;
                     store.update(|v| {
@@ -461,7 +454,7 @@ pub(super) async fn run_action_inner(
                     r
                 }
                 Err(e) => {
-                    let mut s = j.state.lock().unwrap();
+                    let mut s = j.progress();
                     s.status = TaskStatus::Unknown;
                     s.error = format!(
                         "提交请求已发出，但未得到可确认结果：{e}。请先检查服务端记录，勿重复提交"
@@ -472,7 +465,7 @@ pub(super) async fn run_action_inner(
         }
         "gyro_link" => {
             let (sid, k) = {
-                let s = j.state.lock().unwrap();
+                let s = j.progress();
                 (
                     s.submit
                         .as_ref()
@@ -491,15 +484,15 @@ pub(super) async fn run_action_inner(
                 None,
             )
             .await?;
-            j.state.lock().unwrap().gyro_linked = true;
+            j.progress().gyro_linked = true;
             r
         }
         "complete" => {
-            let submitted = j.state.lock().unwrap().submit.clone();
+            let submitted = j.progress().submit.clone();
             let mut result = if let Some(r) = submitted {
                 r
             } else {
-                let mut s = j.state.lock().unwrap();
+                let mut s = j.progress();
                 s.status = TaskStatus::Failed;
                 s.error = crate::session::ApiError::from(text(&args, "error")).message;
                 return Ok(json!({"status":0,"info":s.error}));
@@ -523,8 +516,8 @@ pub(super) async fn run_action_inner(
             }
             let status = text(&result["data"], "record_status");
             let gyro_ok = {
-                let s = j.state.lock().unwrap();
-                number(s.rules.as_ref().unwrap(), "gyroscope_type") <= 0.
+                let s = j.progress();
+                number(s.rules.as_ref().ok_or("学校规则未加载")?, "gyroscope_type") <= 0.
                     || s.gyro_linked
                     || j.mode == "free"
             };
@@ -541,6 +534,8 @@ pub(super) async fn run_action_inner(
             } else {
                 format!("已提交，但服务端成绩状态为 {status}，记录 #{record_id}")
             });
+            let mut s = j.progress();
+            s.check()?;
             crate::receipts::complete(
                 &store,
                 &data.account.uid.clone(),
@@ -548,7 +543,6 @@ pub(super) async fn run_action_inner(
                 RecordId(record_id),
                 result.clone(),
             )?;
-            let mut s = j.state.lock().map_err(|_| "任务不可用")?;
             s.status = TaskStatus::Done;
             s.result = result.clone();
             result
@@ -568,7 +562,7 @@ pub(super) fn submit_fields(
     j: &Job,
     o: &Value,
 ) -> Result<BTreeMap<String, String>, crate::error::ApiError> {
-    let s = j.state.lock().map_err(|_| "任务不可用")?;
+    let s = j.progress();
     let rules = s.rules.as_ref().ok_or("规则未获取")?;
     let duration = number(o, "durationS");
     let start = number(o, "startTs");
