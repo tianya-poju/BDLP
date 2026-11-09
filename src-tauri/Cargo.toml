@@ -1,11 +1,13 @@
 [package]
 name = "lepao-poju"
-version = "1.1.0"
+version = "1.1.1"
 description = "不道乐跑桌面版"
 authors = ["Lepao Poju"]
 edition = "2021"
 
 [build-dependencies]
+serde = { version="1", features= ["derive"] }
+url = "2"
 serde_json = "1"
 tauri-build = { version = "2.6.3", features = [] }
 
