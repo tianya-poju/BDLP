@@ -274,9 +274,12 @@ pub(crate) async fn finish(
     openid: String,
     token: String,
     login_type: &str,
-    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    attempt_id: &str,
 ) -> Result<(), crate::error::ApiError> {
     let store = app.state::<Store>();
+    let platform = if login_type == "3" { "wechat" } else { "qq" };
+    app.state::<crate::login::Attempts>()
+        .check(attempt_id, platform, &store)?;
     let mut d = snapshot(&store)?;
     crate::store::apply_pending(&mut d);
     let c = cfg();
@@ -332,72 +335,93 @@ pub(crate) async fn finish(
         }
     }
     d.school_name = text(user, "school_name");
-    store.try_update(|v|{if cancel.as_ref().is_some_and(|c|c.load(std::sync::atomic::Ordering::SeqCst)){return Err("已取消登录".into())}crate::accounts::save_active(v);if let Some(existing)=v.profiles.get(&uid).cloned(){if existing.school_id==d.school_id{v.route=existing.route;v.zone=existing.zone;}else{v.route.clear();v.zone=Default::default();}v.run_config=existing.run_config;d.account.label=existing.account.label.clone();}else{v.route.clear();v.zone=Default::default();v.run_config=Default::default();}let entry=json!({"id":d.device_id,"model":crate::store::device_view(&d)["model"],"osVersion":crate::store::device_view(&d)["osVersion"],"uid":uid,"time":SystemTime::now().duration_since(UNIX_EPOCH).map(|t|t.as_millis() as u64).unwrap_or(0)});v.device_history.retain(|h|h["id"]!=entry["id"]);v.device_history.insert(0,entry);v.device_history.truncate(6);v.device_id=d.device_id;v.device=d.device;v.pending_device=Default::default();v.account=d.account;v.school_id=d.school_id;v.school_name=d.school_name;Ok(())})?;
+    app.state::<crate::login::Attempts>().commit(attempt_id,platform,&store,&app.state::<crate::running::Runs>(),|v|{crate::accounts::save_active(v);if let Some(existing)=v.profiles.get(&uid).cloned(){if existing.school_id==d.school_id{v.route=existing.route;v.zone=existing.zone;}else{v.route.clear();v.zone=Default::default();}v.run_config=existing.run_config;d.account.label=existing.account.label.clone();}else{v.route.clear();v.zone=Default::default();v.run_config=Default::default();}let entry=json!({"id":d.device_id,"model":crate::store::device_view(&d)["model"],"osVersion":crate::store::device_view(&d)["osVersion"],"uid":uid,"time":SystemTime::now().duration_since(UNIX_EPOCH).map(|t|t.as_millis() as u64).unwrap_or(0)});v.device_history.retain(|h|h["id"]!=entry["id"]);v.device_history.insert(0,entry);v.device_history.truncate(6);v.device_id=d.device_id;v.device=d.device;v.pending_device=Default::default();v.account=d.account;v.school_id=d.school_id;v.school_name=d.school_name;Ok(())})?;
     Ok(())
 }
 #[tauri::command]
-pub async fn qq_login_start(app: tauri::AppHandle) -> Result<(), crate::error::ApiError> {
+pub async fn qq_login_start(
+    attempt_id: String,
+    app: tauri::AppHandle,
+) -> Result<(), crate::error::ApiError> {
     let store = app.state::<Store>();
-    store.update(|d| {
-        if d.device_id.is_empty() {
-            d.device_id = uuid::Uuid::new_v4().to_string()
-        }
-    })?;
-    if app.get_webview_window("qq-login").is_some() {
+    app.state::<crate::login::Attempts>()
+        .check(&attempt_id, "qq", &store)?;
+    crate::running::ensure_idle(&app.state::<crate::running::Runs>())?;
+    let label = format!("qq-login-{attempt_id}");
+    if app.get_webview_window(&label).is_some() {
         return Err("QQ 授权窗口已打开".into());
     }
     let url: url::Url = cfg().qq_url.parse().map_err(|_| "授权地址无效")?;
     let handle = app.clone();
+    let ident = attempt_id.clone();
+    let window_label = label.clone();
     let once = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    tauri::WebviewWindowBuilder::new(&app, "qq-login", tauri::WebviewUrl::External(url))
+    let window = tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::External(url))
         .data_directory(
             crate::data_root::root()
-                .map_err(|e| e.to_string())?
+                .map_err(|_| "数据目录不可用")?
                 .join("webview/qq-login"),
         )
         .title("不道乐跑 · QQ 扫码授权")
         .inner_size(560., 680.)
         .on_navigation(move |url| {
-            let mut pairs: BTreeMap<String, String> = url
-                .query_pairs()
-                .map(|(k, v)| (k.into_owned(), v.into_owned()))
-                .collect();
-            if let Some(f) = url.fragment() {
-                pairs.extend(
-                    url::form_urlencoded::parse(f.trim_start_matches('&').as_bytes())
-                        .map(|(k, v)| (k.into_owned(), v.into_owned())),
-                )
-            }
-            if let (Some(id), Some(token)) = (pairs.get("openid"), pairs.get("access_token")) {
-                if !(url.host_str() == Some("imgcache.qq.com")
-                    || (url.scheme() == "auth" && url.host_str() == Some("tauth.qq.com")))
-                {
-                    return false;
-                }
-                if !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                    let h = handle.clone();
-                    let id = id.clone();
-                    let token = token.clone();
-                    tauri::async_runtime::spawn(async move {
-                        let result = finish(h.clone(), id, token, "2", None).await;
-                        let payload = match result {
-                            Ok(_) => json!({"ok":true}),
-                            Err(e) => json!({"ok":false,"error":e.message}),
-                        };
-                        let _ = h.emit_to("main", "login-result", payload);
-                        if let Some(w) = h.get_webview_window("qq-login") {
-                            let _ = w.close();
-                        }
-                    });
-                }
+            if handle
+                .state::<crate::login::Attempts>()
+                .check(&ident, "qq", &handle.state::<Store>())
+                .is_err()
+            {
                 return false;
             }
-            url.host_str()
-                .is_some_and(|h| h == "qq.com" || h.ends_with(".qq.com"))
-                && url.scheme() == "https"
+            match crate::login::qq_credentials(url) {
+                Ok(Some((id, token))) => {
+                    if !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        let h = handle.clone();
+                        let ident = ident.clone();
+                        let label = window_label.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let result = finish(h.clone(), id, token, "2", &ident).await;
+                            let payload = match result {
+                                Ok(()) => json!({"ok":true,"attemptId":ident}),
+                                Err(e) => json!({"ok":false,"attemptId":ident,"error":e.message}),
+                            };
+                            let _ = h.emit_to("main", "login-result", payload);
+                            if let Some(w) = h.get_webview_window(&label) {
+                                let _ = w.close();
+                            }
+                        });
+                    }
+                    false
+                }
+                Err(_) => false,
+                Ok(None) => {
+                    url.scheme() == "https"
+                        && url.username().is_empty()
+                        && url.password().is_none()
+                        && url.port().is_none()
+                        && url
+                            .host_str()
+                            .is_some_and(|h| h == "qq.com" || h.ends_with(".qq.com"))
+                }
+            }
         })
         .build()
         .map_err(|_| "无法打开 QQ 授权窗口")?;
+    let h = app.clone();
+    let closed_id = attempt_id.clone();
+    window.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            h.state::<crate::login::Attempts>()
+                .cancel_pending(&closed_id);
+        }
+    });
+    if app
+        .state::<crate::login::Attempts>()
+        .check(&attempt_id, "qq", &store)
+        .is_err()
+    {
+        let _ = window.close();
+        return Err(crate::error::ApiError::cancelled());
+    }
     Ok(())
 }
 
@@ -663,7 +687,7 @@ pub async fn network_read(
             crate::session::invalidate(&store, &expected)?
         }
     }
-    r.map_err(Into::into)
+    r
 }
 
 #[cfg(test)]
