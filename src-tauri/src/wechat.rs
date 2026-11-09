@@ -102,10 +102,10 @@ pub async fn wechat_login_start(app: tauri::AppHandle) -> Result<Value, crate::e
         &client,
         "https://open.weixin.qq.com/connect/app/qrconnect",
         &[
-            ("appid", c["WX_APP_ID"].as_str().unwrap()),
-            ("bundleid", c["WX_BUNDLE_ID"].as_str().unwrap()),
-            ("scope", c["WX_SCOPE"].as_str().unwrap()),
-            ("state", c["WX_STATE"].as_str().unwrap()),
+            ("appid", &c.wx_app_id),
+            ("bundleid", &c.wx_bundle_id),
+            ("scope", &c.wx_scope),
+            ("state", &c.wx_state),
         ],
         15,
     )
@@ -174,7 +174,7 @@ async fn wait(
     id: &str,
     client: &reqwest::Client,
     uuid: &str,
-    c: Value,
+    c: &'static crate::protocol_config::ProtocolConfig,
     cancel: Arc<AtomicBool>,
 ) -> Result<(), crate::error::ApiError> {
     let deadline = Instant::now() + Duration::from_secs(300);
@@ -213,8 +213,8 @@ async fn wait(
                     client,
                     "https://api.weixin.qq.com/sns/oauth2/access_token",
                     &[
-                        ("appid", c["WX_APP_ID"].as_str().unwrap()),
-                        ("secret", c["WX_APP_SECRET"].as_str().unwrap()),
+                        ("appid", &c.wx_app_id),
+                        ("secret", &c.wx_app_secret),
                         ("code", &code),
                         ("grant_type", "authorization_code"),
                     ],
@@ -296,10 +296,10 @@ mod live_qr_tests {
                 &client,
                 "https://open.weixin.qq.com/connect/app/qrconnect",
                 &[
-                    ("appid", c["WX_APP_ID"].as_str().unwrap()),
-                    ("bundleid", c["WX_BUNDLE_ID"].as_str().unwrap()),
-                    ("scope", c["WX_SCOPE"].as_str().unwrap()),
-                    ("state", c["WX_STATE"].as_str().unwrap()),
+                    ("appid", &c.wx_app_id),
+                    ("bundleid", &c.wx_bundle_id),
+                    ("scope", &c.wx_scope),
+                    ("state", &c.wx_state),
                 ],
                 15,
             )
