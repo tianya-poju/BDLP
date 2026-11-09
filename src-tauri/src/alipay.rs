@@ -32,7 +32,11 @@ fn now() -> i64 {
 }
 fn uri(d: &Data, position: u8, time: i64) -> Result<String, crate::error::ApiError> {
     let value=format!("{{\"uid\":{},\"start_time\":{time},\"position\":{position},\"token\":{},\"school_id\":{}}}",serde_json::to_string(&d.account.uid.clone()).unwrap(),serde_json::to_string(&d.account.token.clone()).unwrap(),serde_json::to_string(&d.school_id).unwrap());
-    let encrypted = network::encrypt(&value, "tG8xUo2fRq4nYvZ1", "Mw5eHp7jLs9BzXcK")?;
+    let encrypted = network::encrypt(
+        &value,
+        &network::cfg().alipay_key,
+        &network::cfg().alipay_iv,
+    )?;
     let enc = |s: &str| url::form_urlencoded::byte_serialize(s.as_bytes()).collect::<String>();
     Ok(format!("alipays://platformapi/startapp?appId=2021006131634466&thirdPartSchema=lptiyu://&page={}&query=data={}",enc("pages/login/index"),enc(&encrypted)))
 }
