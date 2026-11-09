@@ -57,8 +57,9 @@ pub fn run_execute(
     if sensor.len() > 32 * 1024 * 1024 {
         return Err("传感器数据过大".into());
     }
-    let d = running::begin_execution(&id, &app)?;
+    let (d, execution) = running::begin_execution(&id, &app)?;
     tauri::async_runtime::spawn(async move {
+        let _execution = execution;
         if let Err(e) = execute(&app, &id, &d, plan).await {
             if crate::session::auth_error(&e) {
                 let _ = crate::session::invalidate(&app.state::<Store>(), &d);
