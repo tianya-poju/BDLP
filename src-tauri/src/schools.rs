@@ -4,14 +4,14 @@ use crate::{
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-pub fn merged(store: &Store) -> Result<BTreeMap<String, String>, String> {
+pub fn merged(store: &Store) -> Result<BTreeMap<String, String>, crate::error::ApiError> {
     let mut all: BTreeMap<String, String> =
         serde_json::from_str(crate::SCHOOLS).map_err(|_| "内置学校表损坏")?;
     all.extend(network::snapshot(store)?.school_cache);
     Ok(all)
 }
 #[tauri::command]
-pub fn schools_list(store: tauri::State<Store>) -> Result<Value, String> {
+pub fn schools_list(store: tauri::State<Store>) -> Result<Value, crate::error::ApiError> {
     Ok(
         json!({"list":merged(&store)?.into_iter().map(|(id,name)|json!({"id":id,"name":name})).collect::<Vec<_>>()}),
     )
@@ -38,7 +38,7 @@ fn valid(list: &Value) -> BTreeMap<String, String> {
 }
 pub async fn refresh(store: &Store) -> Result<Value, crate::session::ApiError> {
     let mut d = network::snapshot(&store)?;
-    d.account = json!({"uid":"1","token":""});
+    d.account = serde_json::from_value(json!({"uid":"1","token":""}))?;
     d.school_id = "0".into();
     let r = network::call(
         &d,

@@ -18,13 +18,13 @@ pub struct Registration {
     gate: tokio::sync::Mutex<()>,
     page: Mutex<Option<Page>>,
 }
-fn owner(store: &Store) -> Result<String, String> {
+fn owner(store: &Store) -> Result<String, crate::error::ApiError> {
     let d = crate::network::snapshot(store)?;
     let uid = crate::accounts::uid(&d);
-    let token = d.account["token"]
-        .as_str()
-        .filter(|t| !t.is_empty())
-        .ok_or("请先登录")?;
+    let token = d.account.token.as_str();
+    if token.is_empty() {
+        return Err("请先登录".into());
+    }
     Ok(format!(
         "{:x}",
         Sha256::digest(format!("{}:{}", uid, token))
@@ -52,7 +52,7 @@ pub async fn open(
     app: tauri::AppHandle,
     store: &Store,
     registration: &Registration,
-) -> Result<Status, String> {
+) -> Result<Status, crate::error::ApiError> {
     // Window creation must run outside a synchronous Tauri command on Windows.
     let _gate = registration.gate.lock().await;
     let identity = owner(store)?;
@@ -88,7 +88,7 @@ pub async fn open(
             .map_err(|_| "注册地址无效")?;
     url.query_pairs_mut()
         .append_pair("login_type", "1")
-        .append_pair("token", d.account["token"].as_str().ok_or("请先登录")?)
+        .append_pair("token", d.account.token.as_str())
         .append_pair("uid", &crate::accounts::uid(&d));
     let handle = app.clone();
     let label = id.clone();

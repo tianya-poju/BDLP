@@ -24,13 +24,13 @@ impl Release {
 #[derive(Default)]
 pub struct Checks {
     gate: tokio::sync::Mutex<()>,
-    result: Mutex<(u64, Option<Result<Release, String>>)>,
+    result: Mutex<(u64, Option<Result<Release, crate::error::ApiError>>)>,
 }
 impl Checks {
-    async fn coalesce<F, Fut>(&self, fetch: F) -> Result<Release, String>
+    async fn coalesce<F, Fut>(&self, fetch: F) -> Result<Release, crate::error::ApiError>
     where
         F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = Result<Release, String>>,
+        Fut: std::future::Future<Output = Result<Release, crate::error::ApiError>>,
     {
         let generation = self.result.lock().map_err(|_| "更新检查状态不可用")?.0;
         let _gate = self.gate.lock().await;
@@ -49,7 +49,7 @@ impl Checks {
         result
     }
 }
-fn parse(bytes: &[u8], current: &str) -> Result<Release, String> {
+fn parse(bytes: &[u8], current: &str) -> Result<Release, crate::error::ApiError> {
     let value: serde_json::Value =
         serde_json::from_slice(bytes).map_err(|_| "GitHub 返回格式异常，请稍后重试")?;
     if value["draft"].as_bool().is_none() || value["prerelease"].as_bool().is_none() {
@@ -77,7 +77,7 @@ fn parse(bytes: &[u8], current: &str) -> Result<Release, String> {
         release_url: PAGE,
     })
 }
-fn response_status(status: u16) -> Result<bool, String> {
+fn response_status(status: u16) -> Result<bool, crate::error::ApiError> {
     match status {
         200 => Ok(true),
         404 => Ok(false),
@@ -86,21 +86,21 @@ fn response_status(status: u16) -> Result<bool, String> {
         _ => Err("GitHub 更新服务暂不可用，请稍后重试".into()),
     }
 }
-fn network_error(error: reqwest::Error) -> String {
-    if error.is_timeout() {
-        "检查更新超时，请稍后重试".into()
+fn network_error(error: reqwest::Error) -> crate::error::ApiError {
+    crate::error::ApiError::network(if error.is_timeout() {
+        "检查更新超时，请稍后重试"
     } else {
-        "无法连接 GitHub，请检查网络后重试".into()
-    }
+        "无法连接 GitHub，请检查网络后重试"
+    })
 }
-fn append_limited(bytes: &mut Vec<u8>, chunk: &[u8]) -> Result<(), String> {
+fn append_limited(bytes: &mut Vec<u8>, chunk: &[u8]) -> Result<(), crate::error::ApiError> {
     if bytes.len() + chunk.len() > LIMIT {
         return Err("GitHub 更新响应过大，已停止读取".into());
     }
     bytes.extend_from_slice(chunk);
     Ok(())
 }
-async fn fetch() -> Result<Release, String> {
+async fn fetch() -> Result<Release, crate::error::ApiError> {
     // Dedicated anonymous client: never reuse the account client's cookies or headers.
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
@@ -128,17 +128,19 @@ async fn fetch() -> Result<Release, String> {
     parse(&bytes, env!("CARGO_PKG_VERSION"))
 }
 #[tauri::command]
-pub async fn update_check(checks: tauri::State<'_, Checks>) -> Result<Release, String> {
+pub async fn update_check(
+    checks: tauri::State<'_, Checks>,
+) -> Result<Release, crate::error::ApiError> {
     checks
         .coalesce(|| async {
             tokio::time::timeout(std::time::Duration::from_secs(10), fetch())
                 .await
-                .map_err(|_| "检查更新超时，请稍后重试".to_string())?
+                .map_err(|_| crate::error::ApiError::network("检查更新超时，请稍后重试"))?
         })
         .await
 }
 #[tauri::command]
-pub fn update_open() -> Result<(), String> {
+pub fn update_open() -> Result<(), crate::error::ApiError> {
     use std::os::windows::ffi::OsStrExt;
     let wide = |s: &str| {
         std::ffi::OsStr::new(s)
@@ -271,15 +273,30 @@ mod tests {
                 .err()
                 .unwrap()
         });
-        assert!(network_error(error).contains("超时"));
+        let error = network_error(error);
+        assert_eq!(error.kind, crate::error::ErrorKind::Network);
+        assert!(error.message.contains("超时"));
         server.join().unwrap();
     }
     #[test]
     #[ignore]
     fn published_release_readonly() {
         let r = tauri::async_runtime::block_on(fetch()).unwrap();
-        assert_eq!(r.latest_version.as_deref(), Some("1.0.0"));
+        assert_eq!(r.latest_version.as_deref(), Some("1.1.0"));
         assert_eq!(r.status, "current");
-        println!("Published release confirmed: 1.0.0");
+        let response = reqwest::Client::new();
+        let bytes = tauri::async_runtime::block_on(async {
+            response
+                .get(API)
+                .header("User-Agent", "BDLP-release-verification")
+                .send()
+                .await
+                .unwrap()
+                .bytes()
+                .await
+                .unwrap()
+        });
+        assert_eq!(parse(&bytes, "1.0.0").unwrap().status, "available");
+        println!("Published release confirmed: 1.1.0; 1.0.0 detects available update");
     }
 }

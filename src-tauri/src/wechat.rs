@@ -42,7 +42,7 @@ async fn get_text(
     url: &str,
     query: &[(&str, &str)],
     timeout: u64,
-) -> Result<String, String> {
+) -> Result<String, crate::error::ApiError> {
     let r = client
         .get(url)
         .query(query)
@@ -57,7 +57,7 @@ async fn get_text(
             }
         })?;
     if !r.status().is_success() {
-        return Err(format!("微信服务 HTTP {}", r.status().as_u16()));
+        return Err(format!("微信服务 HTTP {}", r.status().as_u16()).into());
     }
     let b = r.bytes().await.map_err(|_| "微信响应读取失败")?;
     if b.len() > 2 * 1024 * 1024 {
@@ -66,7 +66,7 @@ async fn get_text(
     String::from_utf8(b.to_vec()).map_err(|_| "微信响应编码无效".into())
 }
 #[tauri::command]
-pub async fn wechat_login_start(app: tauri::AppHandle) -> Result<Value, String> {
+pub async fn wechat_login_start(app: tauri::AppHandle) -> Result<Value, crate::error::ApiError> {
     let generation = app.state::<Sessions>().1.fetch_add(1, Ordering::SeqCst) + 1;
     {
         let sessions = app.state::<Sessions>();
@@ -162,7 +162,7 @@ pub async fn wechat_login_start(app: tauri::AppHandle) -> Result<Value, String> 
                 status(&task_app, &task_id, "done", "登录成功");
                 let _ = task_app.emit_to("main", "login-result", json!({"ok":true}));
             }
-            Err(e) => status(&task_app, &task_id, "error", &e),
+            Err(e) => status(&task_app, &task_id, "error", &e.message),
         }
     });
     Ok(
@@ -176,7 +176,7 @@ async fn wait(
     uuid: &str,
     c: Value,
     cancel: Arc<AtomicBool>,
-) -> Result<(), String> {
+) -> Result<(), crate::error::ApiError> {
     let deadline = Instant::now() + Duration::from_secs(300);
     let mut last = 408;
     while Instant::now() < deadline {
@@ -250,13 +250,19 @@ async fn wait(
     Err("等待扫码超时，请重新获取二维码".into())
 }
 #[tauri::command]
-pub fn wechat_login_poll(sid: String, state: tauri::State<Sessions>) -> Result<Value, String> {
+pub fn wechat_login_poll(
+    sid: String,
+    state: tauri::State<Sessions>,
+) -> Result<Value, crate::error::ApiError> {
     let map = state.0.lock().map_err(|_| "扫码状态不可用")?;
     let s = map.get(&sid).ok_or("扫码会话不存在或已取消")?;
     Ok(json!({"status":s.status,"message":s.message}))
 }
 #[tauri::command]
-pub fn wechat_login_cancel(sid: String, state: tauri::State<Sessions>) -> Result<(), String> {
+pub fn wechat_login_cancel(
+    sid: String,
+    state: tauri::State<Sessions>,
+) -> Result<(), crate::error::ApiError> {
     let mut map = state.0.lock().map_err(|_| "扫码状态不可用")?;
     if let Some(s) = map.remove(&sid) {
         s.cancel.store(true, Ordering::SeqCst)

@@ -1,6 +1,6 @@
 [package]
 name = "lepao-poju"
-version = "1.0.0"
+version = "1.1.0"
 description = "不道乐跑桌面版"
 authors = ["Lepao Poju"]
 edition = "2021"

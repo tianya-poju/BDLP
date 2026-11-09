@@ -1,19 +1,42 @@
-import {Geo} from './amap-adapter.js';
-export function createBaseMap(el,opts={}){return Geo.map(el,opts);}
+import { Geo } from "./amap-adapter.js";
+export function createBaseMap(el, opts = {}) {
+  return Geo.map(el, opts);
+}
 
 /** 围栏多边形（iOS systemOrange，半透明填充） */
 export function drawFence(map, fence) {
   if (!fence || fence.length < 3) return null;
-  return Geo.polygon(fence.map((p) => [p[0], p[1]]), {
-    color: '#FF9500', weight: 2, opacity: 0.85, fillColor: '#FF9500', fillOpacity: 0.15,
-  }).addTo(map);
+  return Geo.polygon(
+    fence.map((p) => [p[0], p[1]]),
+    {
+      color: "#FF9500",
+      weight: 2,
+      opacity: 0.85,
+      fillColor: "#FF9500",
+      fillOpacity: 0.15,
+    },
+  ).addTo(map);
 }
 
 /** 双描边轨迹线（白描边 + systemBlue 主线） */
-export function drawPath(map, points, { color = '#007AFF', weight = 4, dash = null, fit = true } = {}) {
+export function drawPath(
+  map,
+  points,
+  { color = "#007AFF", weight = 4, dash = null, fit = true } = {},
+) {
   if (!points || points.length < 2) return null;
-  const casing = Geo.polyline(points, { color: '#ffffff', weight: weight + 3, opacity: 0.85, lineJoin: 'round' }).addTo(map);
-  const line = Geo.polyline(points, { color, weight, lineJoin: 'round', dashArray: dash }).addTo(map);
+  const casing = Geo.polyline(points, {
+    color: "#ffffff",
+    weight: weight + 3,
+    opacity: 0.85,
+    lineJoin: "round",
+  }).addTo(map);
+  const line = Geo.polyline(points, {
+    color,
+    weight,
+    lineJoin: "round",
+    dashArray: dash,
+  }).addTo(map);
   const group = Geo.layerGroup([casing, line]).addTo(map);
   if (fit) map.fitBounds(line.getBounds(), { padding: [28, 28] });
   return group;
@@ -21,25 +44,28 @@ export function drawPath(map, points, { color = '#007AFF', weight = 4, dash = nu
 
 export function startIcon() {
   return Geo.divIcon({
-    className: '',
+    className: "",
     html: '<div style="width:15px;height:15px;border-radius:50%;background:#34C759;border:2.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.25)"></div>',
-    iconSize: [15, 15], iconAnchor: [7.5, 7.5],
+    iconSize: [15, 15],
+    iconAnchor: [7.5, 7.5],
   });
 }
 
 export function endIcon() {
   return Geo.divIcon({
-    className: '',
+    className: "",
     html: '<div style="width:15px;height:15px;border-radius:50%;background:#FF3B30;border:2.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.25)"></div>',
-    iconSize: [15, 15], iconAnchor: [7.5, 7.5],
+    iconSize: [15, 15],
+    iconAnchor: [7.5, 7.5],
   });
 }
 
-export function pointIcon(text = '', tone = 'default') {
+export function pointIcon(text = "", tone = "default") {
   return Geo.divIcon({
-    className: '',
-    html: `<div style="width:19px;height:19px;border-radius:50%;background:${tone==='danger'?'#FF3B30':'#FF9500'};border:2px solid #fff;color:#fff;font-size:10px;font-weight:600;line-height:15px;text-align:center;font-family:ui-monospace,monospace;box-shadow:0 1px 3px rgba(0,0,0,.25)">${text}</div>`,
-    iconSize: [19, 19], iconAnchor: [9.5, 9.5],
+    className: "",
+    html: `<div style="width:19px;height:19px;border-radius:50%;background:${tone === "danger" ? "#FF3B30" : "#FF9500"};border:2px solid #fff;color:#fff;font-size:10px;font-weight:600;line-height:15px;text-align:center;font-family:ui-monospace,monospace;box-shadow:0 1px 3px rgba(0,0,0,.25)">${text}</div>`,
+    iconSize: [19, 19],
+    iconAnchor: [9.5, 9.5],
   });
 }
 
@@ -62,22 +88,36 @@ function simplifyDP(pts, tolM) {
   while (stack.length) {
     const [s, e] = stack.pop();
     if (e - s < 2) continue;
-    const x1 = x(pts[s]); const y1 = y(pts[s]);
-    const x2 = x(pts[e]); const y2 = y(pts[e]);
-    const dx = x2 - x1; const dy = y2 - y1;
+    const x1 = x(pts[s]);
+    const y1 = y(pts[s]);
+    const x2 = x(pts[e]);
+    const y2 = y(pts[e]);
+    const dx = x2 - x1;
+    const dy = y2 - y1;
     const len2 = dx * dx + dy * dy;
-    let maxD2 = -1; let idx = -1;
+    let maxD2 = -1;
+    let idx = -1;
     for (let i = s + 1; i < e; i += 1) {
-      const px = x(pts[i]); const py = y(pts[i]);
+      const px = x(pts[i]);
+      const py = y(pts[i]);
       let d2;
       if (len2 === 0) d2 = (px - x1) ** 2 + (py - y1) ** 2;
       else {
-        const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / len2));
+        const t = Math.max(
+          0,
+          Math.min(1, ((px - x1) * dx + (py - y1) * dy) / len2),
+        );
         d2 = (px - (x1 + t * dx)) ** 2 + (py - (y1 + t * dy)) ** 2;
       }
-      if (d2 > maxD2) { maxD2 = d2; idx = i; }
+      if (d2 > maxD2) {
+        maxD2 = d2;
+        idx = i;
+      }
     }
-    if (maxD2 > sqTol) { keep[idx] = true; stack.push([s, idx], [idx, e]); }
+    if (maxD2 > sqTol) {
+      keep[idx] = true;
+      stack.push([s, idx], [idx, e]);
+    }
   }
   return pts.filter((_, i) => keep[i]);
 }
@@ -89,7 +129,8 @@ function chaikin(pts, iterations = 1) {
     if (out.length < 3) return out;
     const next = [out[0]];
     for (let i = 0; i < out.length - 1; i += 1) {
-      const p = out[i]; const q = out[i + 1];
+      const p = out[i];
+      const q = out[i + 1];
       next.push([p[0] * 0.75 + q[0] * 0.25, p[1] * 0.75 + q[1] * 0.25]);
       next.push([p[0] * 0.25 + q[0] * 0.75, p[1] * 0.25 + q[1] * 0.75]);
     }
@@ -111,14 +152,20 @@ export class RouteEditorMap {
   constructor(el, opts = {}) {
     this.onChange = opts.onChange || (() => {});
     this.points = (opts.points || []).map((p) => [Number(p[0]), Number(p[1])]);
-    this.mode = opts.mode === 'point' ? 'browse' : 'draw'; // draw = 手绘 | browse = 精确加点
+    this.mode = opts.mode === "point" ? "browse" : "draw"; // draw = 手绘 | browse = 精确加点
     /** 每一笔的起始下标（手绘模式「撤销」= 撤销一整笔） */
     this.strokes = [];
     const hasCenter = Boolean(opts.center || this.points[0]);
-    this.map = createBaseMap(el, { center: opts.center || this.points[0], zoom: hasCenter ? 17 : 5 });
+    this.map = createBaseMap(el, {
+      center: opts.center || this.points[0],
+      zoom: hasCenter ? 17 : 5,
+    });
     this.line = null;
     this.markers = Geo.layerGroup().addTo(this.map);
-    this.fenceLayer = opts.fence && opts.fence.length >= 3 ? drawFence(this.map, opts.fence) : null;
+    this.fenceLayer =
+      opts.fence && opts.fence.length >= 3
+        ? drawFence(this.map, opts.fence)
+        : null;
     this.#bind();
     this.redraw(opts.fit !== false);
     this.setMode(this.mode);
@@ -128,8 +175,8 @@ export class RouteEditorMap {
     const map = this.map;
 
     // 点击加点（浏览模式）
-    map.on('click', (e) => {
-      if (this.mode !== 'browse') return;
+    map.on("click", (e) => {
+      if (this.mode !== "browse") return;
       this.points.push([+e.latlng.lat.toFixed(6), +e.latlng.lng.toFixed(6)]);
       this.redraw(false);
       this.onChange(this.points);
@@ -154,7 +201,11 @@ export class RouteEditorMap {
       this.points = this.points.slice(0, strokeStart);
       lastLatLng = null;
       if (capturedId !== null) {
-        try { container.releasePointerCapture(capturedId); } catch (_) { /* ignore */ }
+        try {
+          container.releasePointerCapture(capturedId);
+        } catch (_) {
+          /* ignore */
+        }
         capturedId = null;
       }
       this.redraw(false);
@@ -167,7 +218,7 @@ export class RouteEditorMap {
         abortStroke();
         return;
       }
-      if (this.mode !== 'draw') return;
+      if (this.mode !== "draw") return;
       const pt = this.#latLngFromEvent(e);
       if (!pt) return;
       drawing = true;
@@ -190,7 +241,7 @@ export class RouteEditorMap {
       if (lastLatLng && this.map.distance(lastLatLng, pt) < 3.5) return;
       lastLatLng = pt;
       this.points.push([+pt.lat.toFixed(6), +pt.lng.toFixed(6)]);
-      this.redraw(false, true);      // 实时平滑预览
+      this.redraw(false, true); // 实时平滑预览
       this.onChange(this.points, { live: true }); // 只刷统计文字，避免每帧重建面板
     };
     const onUp = (e) => {
@@ -200,12 +251,18 @@ export class RouteEditorMap {
       if (activePointers.size > 0) return;
       drawing = false;
       if (capturedId !== null) {
-        try { container.releasePointerCapture(capturedId); } catch (_) { /* ignore */ }
+        try {
+          container.releasePointerCapture(capturedId);
+        } catch (_) {
+          /* ignore */
+        }
         capturedId = null;
       }
       map.dragging.enable();
       // 抬手：对本笔做 Douglas–Peucker 抽稀（3m 容差）——点数压下来，形状保住
-      const start = this.strokes.length ? this.strokes[this.strokes.length - 1] : 0;
+      const start = this.strokes.length
+        ? this.strokes[this.strokes.length - 1]
+        : 0;
       const raw = this.points.slice(start);
       if (raw.length > 3) {
         this.points = this.points.slice(0, start).concat(simplifyDP(raw, 3));
@@ -214,15 +271,15 @@ export class RouteEditorMap {
       this.onChange(this.points);
     };
 
-    container.addEventListener('pointerdown', onDown);
-    container.addEventListener('pointermove', onMove, { passive: false });
-    container.addEventListener('pointerup', onUp);
-    container.addEventListener('pointercancel', onUp);
+    container.addEventListener("pointerdown", onDown);
+    container.addEventListener("pointermove", onMove, { passive: false });
+    container.addEventListener("pointerup", onUp);
+    container.addEventListener("pointercancel", onUp);
     this.#detachPointer = () => {
-      container.removeEventListener('pointerdown', onDown);
-      container.removeEventListener('pointermove', onMove);
-      container.removeEventListener('pointerup', onUp);
-      container.removeEventListener('pointercancel', onUp);
+      container.removeEventListener("pointerdown", onDown);
+      container.removeEventListener("pointermove", onMove);
+      container.removeEventListener("pointerup", onUp);
+      container.removeEventListener("pointercancel", onUp);
     };
   }
 
@@ -236,8 +293,8 @@ export class RouteEditorMap {
 
   setMode(mode) {
     this.mode = mode;
-    this.map.getContainer().style.cursor = mode === 'draw' ? 'crosshair' : '';
-    if (mode === 'draw') this.map.dragging.disable();
+    this.map.getContainer().style.cursor = mode === "draw" ? "crosshair" : "";
+    if (mode === "draw") this.map.dragging.disable();
     else this.map.dragging.enable();
   }
 
@@ -248,14 +305,18 @@ export class RouteEditorMap {
     this.onChange(this.points);
   }
 
-  getPoints() { return this.points; }
+  getPoints() {
+    return this.points;
+  }
 
   /** 手绘模式下已有的笔画数（整笔撤销用） */
-  getStrokeCount() { return this.strokes.length; }
+  getStrokeCount() {
+    return this.strokes.length;
+  }
 
   /** 撤销：手绘模式撤销一整笔；精确模式删掉最后一个点 */
   undo() {
-    if (this.mode === 'draw' && this.strokes.length) {
+    if (this.mode === "draw" && this.strokes.length) {
       const start = this.strokes.pop();
       this.points = this.points.slice(0, start);
     } else {
@@ -273,8 +334,10 @@ export class RouteEditorMap {
   }
 
   fitToFence() {
-    if (this.fenceLayer) this.map.fitBounds(this.fenceLayer.getBounds(), { padding: [24, 24] });
-    else if (this.points.length >= 2) this.map.fitBounds(this.points, { padding: [24, 24] });
+    if (this.fenceLayer)
+      this.map.fitBounds(this.fenceLayer.getBounds(), { padding: [24, 24] });
+    else if (this.points.length >= 2)
+      this.map.fitBounds(this.points, { padding: [24, 24] });
   }
 
   /**
@@ -283,24 +346,49 @@ export class RouteEditorMap {
    * @param {boolean} preview 手绘进行中：把当前这一笔做 Chaikin 平滑仅用于显示（模型仍是原始点）
    */
   redraw(fit = false, preview = false) {
-    if (this.line) { this.line.remove(); this.line = null; }
+    if (this.line) {
+      this.line.remove();
+      this.line = null;
+    }
     this.markers.clearLayers();
     const pts = this.points;
     let display = pts;
-    if (preview && this.mode === 'draw' && this.strokes.length) {
+    if (preview && this.mode === "draw" && this.strokes.length) {
       const start = this.strokes[this.strokes.length - 1];
       display = pts.slice(0, start).concat(chaikin(pts.slice(start), 1));
     }
     if (display.length >= 2) {
-      const casing = Geo.polyline(display, { color: '#ffffff', weight: 8, opacity: 0.9, lineJoin: 'round', lineCap: 'round' });
-      const line = Geo.polyline(display, { color: '#007AFF', weight: 4, lineJoin: 'round', lineCap: 'round' });
+      const casing = Geo.polyline(display, {
+        color: "#ffffff",
+        weight: 8,
+        opacity: 0.9,
+        lineJoin: "round",
+        lineCap: "round",
+      });
+      const line = Geo.polyline(display, {
+        color: "#007AFF",
+        weight: 4,
+        lineJoin: "round",
+        lineCap: "round",
+      });
       this.line = Geo.layerGroup([casing, line]).addTo(this.map);
     }
     if (pts.length === 1) {
-      Geo.circleMarker(pts[0], { radius: 5, color: '#007AFF', weight: 2, fillColor: '#007AFF', fillOpacity: 1 }).addTo(this.markers);
+      Geo.circleMarker(pts[0], {
+        radius: 5,
+        color: "#007AFF",
+        weight: 2,
+        fillColor: "#007AFF",
+        fillOpacity: 1,
+      }).addTo(this.markers);
     } else if (pts.length >= 2) {
-      Geo.marker(pts[0], { icon: startIcon(), interactive: false }).addTo(this.markers);
-      Geo.marker(pts[pts.length - 1], { icon: endIcon(), interactive: false }).addTo(this.markers);
+      Geo.marker(pts[0], { icon: startIcon(), interactive: false }).addTo(
+        this.markers,
+      );
+      Geo.marker(pts[pts.length - 1], {
+        icon: endIcon(),
+        interactive: false,
+      }).addTo(this.markers);
     }
     if (fit && pts.length >= 2) this.map.fitBounds(pts, { padding: [24, 24] });
   }
@@ -321,8 +409,21 @@ export class RouteEditorMap {
  * 以前无条件 fitBounds 到轨迹，地图就会永远钉在旧校区。
  */
 export class TrackMap {
-  constructor(el, { track = [], fence = [], checkpoints = [], center, zoom = 17, fitTo = 'auto' } = {}) {
-    this.map = createBaseMap(el, { center: center || (track[0] ? [track[0][0], track[0][1]] : undefined), zoom });
+  constructor(
+    el,
+    {
+      track = [],
+      fence = [],
+      checkpoints = [],
+      center,
+      zoom = 17,
+      fitTo = "auto",
+    } = {},
+  ) {
+    this.map = createBaseMap(el, {
+      center: center || (track[0] ? [track[0][0], track[0][1]] : undefined),
+      zoom,
+    });
     const fenceOk = Boolean(fence && fence.length >= 3);
     if (fenceOk) drawFence(this.map, fence);
     if (track && track.length >= 2) {
@@ -330,21 +431,36 @@ export class TrackMap {
       // 显示层抽稀：GPS 点很密时去掉抖动尖刺，形状不变（只影响画线，与上传数据无关）
       const shown = pts.length > 400 ? simplifyDP(pts, 3) : pts;
       drawPath(this.map, shown, { fit: false });
-      Geo.marker(track[0].slice(0, 2), { icon: startIcon(), interactive: false }).addTo(this.map);
-      Geo.marker(track[track.length - 1].slice(0, 2), { icon: endIcon(), interactive: false }).addTo(this.map);
+      Geo.marker(track[0].slice(0, 2), {
+        icon: startIcon(),
+        interactive: false,
+      }).addTo(this.map);
+      Geo.marker(track[track.length - 1].slice(0, 2), {
+        icon: endIcon(),
+        interactive: false,
+      }).addTo(this.map);
     }
     (checkpoints || []).forEach((cp, i) => {
-      Geo.marker([cp.lat, cp.lng], { icon: pointIcon(String(i + 1)) }).addTo(this.map).bindTooltip(`打卡点 ${cp.id}`);
+      Geo.marker([cp.lat, cp.lng], { icon: pointIcon(String(i + 1)) })
+        .addTo(this.map)
+        .bindTooltip(`打卡点 ${cp.id}`);
     });
 
-    const anchor = fitTo === 'auto' ? (fenceOk ? 'fence' : 'track') : fitTo;
-    const bounds = anchor === 'fence' && fenceOk ? Geo.latLngBounds(fence.map((p) => [p[0], p[1]]))
-      : anchor === 'track' && track && track.length >= 2 ? Geo.latLngBounds(track.map((p) => [p[0], p[1]]))
-        : null;
+    const anchor = fitTo === "auto" ? (fenceOk ? "fence" : "track") : fitTo;
+    const bounds =
+      anchor === "fence" && fenceOk
+        ? Geo.latLngBounds(fence.map((p) => [p[0], p[1]]))
+        : anchor === "track" && track && track.length >= 2
+          ? Geo.latLngBounds(track.map((p) => [p[0], p[1]]))
+          : null;
     if (bounds) this.map.fitBounds(bounds, { padding: [28, 28] });
   }
 
-  fit() { this.map.invalidateSize(); }
+  fit() {
+    this.map.invalidateSize();
+  }
 
-  destroy() { this.map.remove(); }
+  destroy() {
+    this.map.remove();
+  }
 }

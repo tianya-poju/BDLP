@@ -80,7 +80,7 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 pub fn window_preferences(
     behavior: Option<String>,
     store: tauri::State<crate::store::Store>,
-) -> Result<Value, String> {
+) -> Result<Value, crate::error::ApiError> {
     if let Some(b) = behavior {
         if !["ask", "tray", "exit"].contains(&b.as_str()) {
             return Err("关闭行为无效".into());
@@ -90,7 +90,11 @@ pub fn window_preferences(
     Ok(json!({"behavior":crate::network::snapshot(&store)?.close_behavior}))
 }
 #[tauri::command]
-pub fn window_choice(choice: String, remember: bool, app: tauri::AppHandle) -> Result<(), String> {
+pub fn window_choice(
+    choice: String,
+    remember: bool,
+    app: tauri::AppHandle,
+) -> Result<(), crate::error::ApiError> {
     if !["cancel", "tray", "exit"].contains(&choice.as_str()) {
         return Err("关闭行为无效".into());
     }
@@ -119,14 +123,14 @@ mod tests {
         let store = crate::store::Store::open(root.join("settings.dpapi")).unwrap();
         store
             .update(|d| {
-                d.account = json!({"uid":"test","token":"kept"});
+                d.account = serde_json::from_value(json!({"uid":"test","token":"kept"})).unwrap();
                 d.close_behavior = "tray".into();
             })
             .unwrap();
         let read = crate::store::Store::open(root.join("settings.dpapi")).unwrap();
         let d = crate::network::snapshot(&read).unwrap();
         assert_eq!(d.close_behavior, "tray");
-        assert_eq!(d.account["token"], "kept");
+        assert_eq!(d.account.token, "kept");
         std::fs::remove_file(root.join("settings.dpapi")).unwrap();
         std::fs::remove_dir(root).unwrap();
     }

@@ -7,7 +7,7 @@ use hmac::{Hmac, Mac};
 use serde_json::{json, Value};
 use sha1::Sha1;
 use std::collections::BTreeMap;
-fn download_url(file: &str) -> Result<url::Url, String> {
+fn download_url(file: &str) -> Result<url::Url, crate::error::ApiError> {
     let url = if file.starts_with("https://") {
         url::Url::parse(file)
     } else if file.contains("://") || file.starts_with("//") {
@@ -31,7 +31,7 @@ fn download_url(file: &str) -> Result<url::Url, String> {
     }
     Ok(url)
 }
-fn decode(raw: &str) -> Result<Vec<Value>, String> {
+fn decode(raw: &str) -> Result<Vec<Value>, crate::error::ApiError> {
     let c = cfg();
     let plain = decrypt(
         raw,
@@ -63,9 +63,9 @@ fn decode(raw: &str) -> Result<Vec<Value>, String> {
     }
     Ok(out)
 }
-async fn read_limited(response: reqwest::Response) -> Result<String, String> {
+async fn read_limited(response: reqwest::Response) -> Result<String, crate::error::ApiError> {
     if !response.status().is_success() {
-        return Err(format!("轨迹下载 HTTP {}", response.status().as_u16()));
+        return Err(format!("轨迹下载 HTTP {}", response.status().as_u16()).into());
     }
     let mut r = response;
     let mut b = vec![];
@@ -77,7 +77,10 @@ async fn read_limited(response: reqwest::Response) -> Result<String, String> {
     }
     String::from_utf8(b).map_err(|_| "轨迹文件编码无效".into())
 }
-async fn load(d: &crate::store::Data, record_id: &str) -> Result<Vec<Value>, String> {
+async fn load(
+    d: &crate::store::Data,
+    record_id: &str,
+) -> Result<Vec<Value>, crate::error::ApiError> {
     let result = call(
         d,
         "Run/recordDetailV270",
@@ -146,18 +149,24 @@ async fn load(d: &crate::store::Data, record_id: &str) -> Result<Vec<Value>, Str
     decode(&read_limited(response).await?)
 }
 #[tauri::command]
-pub async fn record_track(id: String, store: tauri::State<'_, Store>) -> Result<Value, String> {
+pub async fn record_track(
+    id: String,
+    store: tauri::State<'_, Store>,
+) -> Result<Value, crate::error::ApiError> {
     let d = snapshot(&store)?;
-    if text(&d.account, "token").is_empty() {
+    if d.account.token.clone().is_empty() {
         return Err("请先登录".into());
     }
     let points = load(&d, &id).await?;
     Ok(json!({"track":points}))
 }
 #[tauri::command]
-pub async fn record_import(id: String, store: tauri::State<'_, Store>) -> Result<Value, String> {
+pub async fn record_import(
+    id: String,
+    store: tauri::State<'_, Store>,
+) -> Result<Value, crate::error::ApiError> {
     let d = snapshot(&store)?;
-    if text(&d.account, "token").is_empty() {
+    if d.account.token.clone().is_empty() {
         return Err("请先登录".into());
     }
     let points = load(&d, &id).await?;
@@ -174,10 +183,7 @@ pub async fn record_import(id: String, store: tauri::State<'_, Store>) -> Result
     }
     let count = route.len();
     store.try_update(|v| {
-        if v.account["uid"] != d.account["uid"]
-            || v.school_id != d.school_id
-            || v.zone["id"] != d.zone["id"]
-        {
+        if v.account.uid != d.account.uid || v.school_id != d.school_id || v.zone.id != d.zone.id {
             return Err("账号、学校或跑区已切换，未导入路线".into());
         }
         v.route = route;

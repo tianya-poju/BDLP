@@ -11,7 +11,7 @@ async fn action(
     id: &str,
     name: &str,
     args: Value,
-) -> Result<Value, String> {
+) -> Result<Value, crate::error::ApiError> {
     running::run_action(id.into(), name.into(), args, app.clone()).await
 }
 async fn log(app: &tauri::AppHandle, id: &str, message: impl Into<String>) {
@@ -22,7 +22,7 @@ fn n(v: &Value, k: &str) -> f64 {
         .or_else(|| v[k].as_str().and_then(|s| s.parse().ok()))
         .unwrap_or(0.)
 }
-async fn sleep(app: &tauri::AppHandle, id: &str, ms: u64) -> Result<(), String> {
+async fn sleep(app: &tauri::AppHandle, id: &str, ms: u64) -> Result<(), crate::error::ApiError> {
     let mut left = ms;
     while left > 0 {
         running::check_job(id, app)?;
@@ -45,7 +45,11 @@ pub async fn run_prepare(
     Ok(json!({"rules":r["data"],"timestamp":t["data"]}))
 }
 #[tauri::command]
-pub fn run_execute(id: String, plan: Value, app: tauri::AppHandle) -> Result<(), String> {
+pub fn run_execute(
+    id: String,
+    plan: Value,
+    app: tauri::AppHandle,
+) -> Result<(), crate::error::ApiError> {
     let points: Vec<running::Point> =
         serde_json::from_value(plan["points"].clone()).map_err(|_| "轨迹格式无效")?;
     running::validate_points(&points)?;
@@ -59,7 +63,7 @@ pub fn run_execute(id: String, plan: Value, app: tauri::AppHandle) -> Result<(),
             if crate::session::auth_error(&e) {
                 let _ = crate::session::invalidate(&app.state::<Store>(), &d);
             }
-            let _ = action(&app, &id, "fail", json!({"error":e})).await;
+            let _ = action(&app, &id, "fail", json!({"error":e.message})).await;
         }
         running::awaiting(&id, &app, Value::Null);
     });
@@ -72,7 +76,7 @@ async fn face(
     position: u8,
     prior: &str,
     cursor: &mut u32,
-) -> Result<(String, i64), String> {
+) -> Result<(String, i64), crate::error::ApiError> {
     log(app, id, format!("等待本人完成人脸核验，阶段 {position}")).await;
     // beforeRun uses face_verify_type=2 for the official Alipay flow.
     let rules = task_rules(app, id)?;
@@ -102,7 +106,8 @@ async fn face(
                 }
                 Ok(_) => {}
                 Err(e) => {
-                    if crate::session::auth_error(&e) || e.contains("过期") || e.contains("不匹配")
+                    if crate::session::auth_error(&e)
+                        || e.kind == crate::error::ErrorKind::InvalidData
                     {
                         return Err(e);
                     }
@@ -129,12 +134,12 @@ async fn face(
                 if crate::session::auth_error(&e) {
                     return Err(e);
                 }
-                last = e;
+                last = e.message;
                 log(app, id, "本张照片未通过，检查下一张本人照片").await;
             }
         }
     }
-    Err(last)
+    Err(last.into())
 }
 fn now() -> i64 {
     std::time::SystemTime::now()
@@ -142,10 +147,10 @@ fn now() -> i64 {
         .unwrap_or_default()
         .as_secs() as i64
 }
-fn task_rules(app: &tauri::AppHandle, id: &str) -> Result<Value, String> {
+fn task_rules(app: &tauri::AppHandle, id: &str) -> Result<Value, crate::error::ApiError> {
     running::rules_for(id, app)
 }
-fn indices(v: &Value, len: usize) -> Result<Vec<usize>, String> {
+fn indices(v: &Value, len: usize) -> Result<Vec<usize>, crate::error::ApiError> {
     let a = v.as_array().ok_or("任务调度数据缺失")?;
     if a.len() > 40000 {
         return Err("任务调度数量过大".into());
@@ -159,7 +164,12 @@ fn indices(v: &Value, len: usize) -> Result<Vec<usize>, String> {
         })
         .collect()
 }
-async fn execute(app: &tauri::AppHandle, id: &str, d: &Data, mut p: Value) -> Result<(), String> {
+async fn execute(
+    app: &tauri::AppHandle,
+    id: &str,
+    d: &Data,
+    mut p: Value,
+) -> Result<(), crate::error::ApiError> {
     let rules = task_rules(app, id)?;
     let campus = running::mode_for(id, app)? == "campus";
     let fc = &rules["run_face_verify_config"];
@@ -195,7 +205,7 @@ async fn execute(app: &tauri::AppHandle, id: &str, d: &Data, mut p: Value) -> Re
         action(app, id, "register_points", json!({"pointIds":ids})).await?;
     }
     let cfg = &d.run_config;
-    let delay = n(cfg, "replayDelayMs") as u64;
+    let delay = cfg.replay_delay_ms.ok_or("运行参数缺少回放间隔")? as u64;
     let mut capture_key = String::new();
     for (i, point) in points.iter().enumerate() {
         sleep(app, id, delay).await?;
@@ -288,7 +298,8 @@ async fn execute(app: &tauri::AppHandle, id: &str, d: &Data, mut p: Value) -> Re
     if campus && !valid {
         return Err("跑区心跳围栏校验未通过，未提交记录".into());
     }
-    let step_num = ((duration as f64 / 60.) * n(cfg, "cadenceSpm")).trunc() as u64;
+    let step_num =
+        ((duration as f64 / 60.) * cfg.cadence_spm.ok_or("运行参数缺少步频")?).trunc() as u64;
     log(app, id, "正在提交记录，请等待结果").await;
     let payload = json!({"distanceM":n(&p,"distance"),"durationS":duration,"stepNum":step_num,"startTs":start,"endTs":end,"termId":text(&rules,"term_id"),"gameId":text(&rules,"game_id"),"logData":serde_json::to_string(&logs).unwrap(),"passTotal":total,"passEffectiveNum":inside,"isRunningAreaValid":if valid{"1"}else{"0"},"faceVerifyId":face_id,"recordImg":capture_key});
     let r = action(
@@ -334,7 +345,7 @@ fn validate_window(
     start: i64,
     end: i64,
     distance: f64,
-) -> Result<(), String> {
+) -> Result<(), crate::error::ApiError> {
     if n(br, "term_start_time") > 0. && start < (n(br, "term_start_time") as i64)
         || n(br, "term_end_time") > 0. && end > n(br, "term_end_time") as i64
     {

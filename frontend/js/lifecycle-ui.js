@@ -1,8 +1,103 @@
-import {h,openModal,toast} from './util.js';import {invoke} from './ipc.js';
-export function installLifecycle(app){let modal=null,lastCheck=0;
- const closeDialog=()=>{if(modal)return;const remember=h('input',{type:'checkbox'});const choose=async(choice)=>{try{await invoke('window_choice',{choice,remember:remember.checked});modal?.close();}catch(e){toast(e.message,'danger')}};
- modal=openModal({title:'关闭主窗口',body:[h('p',{class:'hint',text:'最小化到系统托盘可保持后台任务运行；完全退出会结束本机任务，已发出的提交请求无法撤回。'}),h('div',{class:'btn-row'},[h('button',{class:'btn btn-block',text:'最小化到系统托盘',onClick:()=>choose('tray')}),h('button',{class:'btn btn-block',text:'完全退出',onClick:()=>choose('exit')})]),h('label',{class:'row'},[remember,h('span',{text:'记住我的选择，不再提示'})])],footer:[h('button',{class:'btn',text:'取消',onClick:()=>choose('cancel')})],onClose:()=>{modal=null}});};
- const check=async()=>{if(Date.now()-lastCheck<30000)return;lastCheck=Date.now();try{const r=await invoke('session_check');if(app.state?.loggedIn&&!r.loggedIn){await app.refresh();toast(r.message,'warn');}}catch(e){if(e.kind!=='network')toast(e.message,'warn')}};
- window.__TAURI__.event.listen('close-requested',closeDialog);window.__TAURI__.event.listen('window-restored',check);window.__TAURI__.event.listen('show-task',async()=>{await app.refresh();app.navigate('console')});window.addEventListener('account-expired',async()=>{await invoke('session_check').catch(()=>{});await app.refresh()});setInterval(check,300000);check();
- app.windowSettingsCard=()=>{const select=h('select',{class:'input'},[['ask','每次询问'],['tray','最小化到系统托盘'],['exit','完全退出']].map(([value,text])=>h('option',{value,text})));invoke('window_preferences',{}).then(v=>select.value=v.behavior||'ask').catch(e=>toast(e.message,'warn'));select.onchange=()=>invoke('window_preferences',{behavior:select.value}).then(()=>toast('关闭行为已保存','ok')).catch(e=>toast(e.message,'danger'));return h('div',{class:'card'},[h('div',{class:'card-head'},[h('h3',{text:'窗口行为'})]),h('div',{class:'card-body'},[h('p',{class:'hint',text:'点击右上角关闭按钮时'}),select])]);};
+import { h, openModal, toast } from "./util.js";
+import { invoke } from "./ipc.js";
+export function installLifecycle(app) {
+  let modal = null,
+    lastCheck = 0;
+  const closeDialog = () => {
+    if (modal) return;
+    const remember = h("input", { type: "checkbox" });
+    const choose = async (choice) => {
+      try {
+        await invoke("window_choice", { choice, remember: remember.checked });
+        modal?.close();
+      } catch (e) {
+        toast(e.message, "danger");
+      }
+    };
+    modal = openModal({
+      title: "关闭主窗口",
+      body: [
+        h("p", {
+          class: "hint",
+          text: "最小化到系统托盘可保持后台任务运行；完全退出会结束本机任务，已发出的提交请求无法撤回。",
+        }),
+        h("div", { class: "btn-row" }, [
+          h("button", {
+            class: "btn btn-block",
+            text: "最小化到系统托盘",
+            onClick: () => choose("tray"),
+          }),
+          h("button", {
+            class: "btn btn-block",
+            text: "完全退出",
+            onClick: () => choose("exit"),
+          }),
+        ]),
+        h("label", { class: "row" }, [
+          remember,
+          h("span", { text: "记住我的选择，不再提示" }),
+        ]),
+      ],
+      footer: [
+        h("button", {
+          class: "btn",
+          text: "取消",
+          onClick: () => choose("cancel"),
+        }),
+      ],
+      onClose: () => {
+        modal = null;
+      },
+    });
+  };
+  const check = async () => {
+    if (Date.now() - lastCheck < 30000) return;
+    lastCheck = Date.now();
+    try {
+      const r = await invoke("session_check");
+      if (app.state?.loggedIn && !r.loggedIn) {
+        await app.refresh();
+        toast(r.message, "warn");
+      }
+    } catch (e) {
+      if (e.kind !== "network") toast(e.message, "warn");
+    }
+  };
+  window.__TAURI__.event.listen("close-requested", closeDialog);
+  window.__TAURI__.event.listen("window-restored", check);
+  window.__TAURI__.event.listen("show-task", async () => {
+    await app.refresh();
+    app.navigate("console");
+  });
+  window.addEventListener("account-expired", async () => {
+    await invoke("session_check").catch(() => {});
+    await app.refresh();
+  });
+  setInterval(check, 300000);
+  check();
+  app.windowSettingsCard = () => {
+    const select = h(
+      "select",
+      { class: "input" },
+      [
+        ["ask", "每次询问"],
+        ["tray", "最小化到系统托盘"],
+        ["exit", "完全退出"],
+      ].map(([value, text]) => h("option", { value, text })),
+    );
+    invoke("window_preferences", {})
+      .then((v) => (select.value = v.behavior || "ask"))
+      .catch((e) => toast(e.message, "warn"));
+    select.onchange = () =>
+      invoke("window_preferences", { behavior: select.value })
+        .then(() => toast("关闭行为已保存", "ok"))
+        .catch((e) => toast(e.message, "danger"));
+    return h("div", { class: "card" }, [
+      h("div", { class: "card-head" }, [h("h3", { text: "窗口行为" })]),
+      h("div", { class: "card-body" }, [
+        h("p", { class: "hint", text: "点击右上角关闭按钮时" }),
+        select,
+      ]),
+    ]);
+  };
 }

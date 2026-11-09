@@ -63,7 +63,7 @@ mod tests {
         let r = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
         prepare(&r).unwrap();
         let s = crate::store::Store::open(r.join("settings.dpapi")).unwrap();
-        assert!(s.data.lock().unwrap().account.is_null());
+        assert!(s.data.lock().unwrap().account.uid.is_empty());
         s.update(|d| {
             d.amap_key = "synthetic".into();
             d.route = vec![[1., 2.], [2., 3.]];

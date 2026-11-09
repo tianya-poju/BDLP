@@ -17,7 +17,7 @@ struct Photo {
 fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
-fn directory(store: &Store, uid: &str) -> Result<PathBuf, String> {
+pub(crate) fn directory(store: &Store, uid: &str) -> Result<PathBuf, crate::error::ApiError> {
     if uid.is_empty() {
         return Err("请先登录或选择账号档案".into());
     }
@@ -28,10 +28,10 @@ fn directory(store: &Store, uid: &str) -> Result<PathBuf, String> {
         .join("faces")
         .join(hash(uid.as_bytes())))
 }
-fn valid_name(name: &str) -> bool {
+pub(crate) fn valid_name(name: &str) -> bool {
     name.len() == 68 && name.ends_with(".bin") && name[..64].bytes().all(|b| b.is_ascii_hexdigit())
 }
-fn parse(data: &str, fingerprint: &str) -> Result<Photo, String> {
+fn parse(data: &str, fingerprint: &str) -> Result<Photo, crate::error::ApiError> {
     if data.len() > MAX_BYTES * 4 / 3 + 256 {
         return Err("照片不能超过 2 MiB".into());
     }
@@ -61,14 +61,14 @@ fn parse(data: &str, fingerprint: &str) -> Result<Photo, String> {
         fingerprint,
     })
 }
-fn read(path: &Path) -> Result<Photo, String> {
+fn read(path: &Path) -> Result<Photo, crate::error::ApiError> {
     let bytes = fs::read(path).map_err(|_| "照片读取失败")?;
     if bytes.len() > MAX_BYTES * 2 {
         return Err("照片文件过大".into());
     }
     serde_json::from_slice(&protect(&bytes, true)?).map_err(|_| "照片数据损坏".into())
 }
-fn files(dir: &Path) -> Result<Vec<PathBuf>, String> {
+fn files(dir: &Path) -> Result<Vec<PathBuf>, crate::error::ApiError> {
     if !dir.exists() {
         return Ok(vec![]);
     }
@@ -87,7 +87,7 @@ fn files(dir: &Path) -> Result<Vec<PathBuf>, String> {
     }
     Ok(out)
 }
-fn write(dir: &Path, name: &str, photo: &Photo) -> Result<(), String> {
+fn write(dir: &Path, name: &str, photo: &Photo) -> Result<(), crate::error::ApiError> {
     fs::create_dir_all(dir).map_err(|_| "无法创建照片目录")?;
     let b = protect(
         &serde_json::to_vec(photo).map_err(|_| "照片编码失败")?,
@@ -102,7 +102,7 @@ fn write(dir: &Path, name: &str, photo: &Photo) -> Result<(), String> {
     }
     result
 }
-fn add(dir: &Path, photo: Photo, replace: Option<&str>) -> Result<String, String> {
+fn add(dir: &Path, photo: Photo, replace: Option<&str>) -> Result<String, crate::error::ApiError> {
     let existing = files(dir)?;
     if let Some(name) = replace {
         if !valid_name(name) || !dir.join(name).is_file() {
@@ -127,7 +127,8 @@ fn add(dir: &Path, photo: Photo, replace: Option<&str>) -> Result<String, String
     Ok(name)
 }
 #[tauri::command]
-pub fn face_photos(store: tauri::State<Store>) -> Result<Value, String> {
+pub fn face_photos(store: tauri::State<Store>) -> Result<Value, crate::error::ApiError> {
+    let _files = store.files.lock().map_err(|_| "照片库正在处理")?;
     let d = store.data.lock().map_err(|_| "数据不可用")?;
     let uid = crate::accounts::uid(&d);
     if uid.is_empty() {
@@ -155,7 +156,8 @@ pub fn face_add(
     fingerprint: String,
     uid: String,
     store: tauri::State<Store>,
-) -> Result<Value, String> {
+) -> Result<Value, crate::error::ApiError> {
+    let _files = store.files.lock().map_err(|_| "照片库正在处理")?;
     let photo = parse(&data_base64, &fingerprint)?;
     let d = store.data.lock().map_err(|_| "数据不可用")?;
     ensure_account(&d, &uid)?;
@@ -169,7 +171,8 @@ pub fn face_replace(
     data_base64: String,
     uid: String,
     store: tauri::State<Store>,
-) -> Result<Value, String> {
+) -> Result<Value, crate::error::ApiError> {
+    let _files = store.files.lock().map_err(|_| "照片库正在处理")?;
     let photo = parse(&data_base64, "")?;
     let d = store.data.lock().map_err(|_| "数据不可用")?;
     ensure_account(&d, &uid)?;
@@ -178,7 +181,12 @@ pub fn face_replace(
     Ok(json!({"status":1}))
 }
 #[tauri::command]
-pub fn face_remove(name: String, uid: String, store: tauri::State<Store>) -> Result<Value, String> {
+pub fn face_remove(
+    name: String,
+    uid: String,
+    store: tauri::State<Store>,
+) -> Result<Value, crate::error::ApiError> {
+    let _files = store.files.lock().map_err(|_| "照片库正在处理")?;
     if !valid_name(&name) {
         return Err("照片名称无效".into());
     }
@@ -191,7 +199,8 @@ pub fn face_remove(name: String, uid: String, store: tauri::State<Store>) -> Res
     }
     Ok(json!({"status":1}))
 }
-pub(crate) fn clear(store: &Store, uid: &str) -> Result<(), String> {
+#[cfg(test)]
+fn clear(store: &Store, uid: &str) -> Result<(), crate::error::ApiError> {
     if uid.is_empty() {
         return Ok(());
     }
@@ -231,12 +240,14 @@ mod tests {
         fs::remove_dir(dir).unwrap();
     }
 }
-async fn query_info(d: &crate::store::Data) -> Result<(reqwest::Client, Value), String> {
+async fn query_info(
+    d: &crate::store::Data,
+) -> Result<(reqwest::Client, Value), crate::error::ApiError> {
     let uid = crate::accounts::uid(d);
-    let token = d.account["token"]
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .ok_or("请先登录")?;
+    let token = d.account.token.as_str();
+    if token.is_empty() {
+        return Err("请先登录".into());
+    }
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         "X-Requested-With",
@@ -293,7 +304,10 @@ async fn query_info(d: &crate::store::Data) -> Result<(reqwest::Client, Value), 
     Ok((client, response))
 }
 #[tauri::command]
-pub async fn face_info(auto_pull: bool, store: tauri::State<'_, Store>) -> Result<Value, String> {
+pub async fn face_info(
+    auto_pull: bool,
+    store: tauri::State<'_, Store>,
+) -> Result<Value, crate::error::ApiError> {
     let d = crate::network::snapshot(&store)?;
     let uid = crate::accounts::uid(&d);
     let (client, response) = query_info(&d).await?;
@@ -353,7 +367,7 @@ pub async fn face_info(auto_pull: bool, store: tauri::State<'_, Store>) -> Resul
     let mut pulled = false;
     let mut pull_error = String::new();
     if auto_pull && !url.is_empty() {
-        let result: Result<Photo, String> = async {
+        let result: Result<Photo, crate::error::ApiError> = async {
             let u = url::Url::parse(&url).map_err(|_| "登记照地址无效")?;
             if u.scheme() != "https"
                 || !u.host_str().is_some_and(|h| {
@@ -392,14 +406,18 @@ pub async fn face_info(auto_pull: bool, store: tauri::State<'_, Store>) -> Resul
         .await;
         match result {
             Ok(photo) => {
+                let _files = store
+                    .files
+                    .lock()
+                    .map_err(|_| crate::error::ApiError::storage("照片库正在处理"))?;
                 let current = store.data.lock().map_err(|_| "数据不可用")?;
-                if crate::accounts::uid(&current) != uid {
+                if !crate::network::same_account(&current, &d) {
                     return Err("账号已切换，未保存登记照".into());
                 }
                 write(&directory(&store, &uid)?, "reference.bin", &photo)?;
                 pulled = true
             }
-            Err(e) => pull_error = e,
+            Err(e) => pull_error = e.message,
         }
     }
     let message = if pulled {
@@ -420,7 +438,7 @@ pub async fn face_registration_open(
     app: tauri::AppHandle,
     store: tauri::State<'_, Store>,
     registration: tauri::State<'_, crate::face_window::Registration>,
-) -> Result<crate::face_window::Status, String> {
+) -> Result<crate::face_window::Status, crate::error::ApiError> {
     crate::face_window::open(app, &store, &registration).await
 }
 #[cfg(test)]
@@ -530,7 +548,7 @@ mod not_opened_tests {
     }
 }
 
-pub(crate) fn clear_reference(store: &Store, uid: &str) -> Result<(), String> {
+pub(crate) fn clear_reference(store: &Store, uid: &str) -> Result<(), crate::error::ApiError> {
     if uid.is_empty() {
         return Ok(());
     }
@@ -566,7 +584,7 @@ mod capacity_tests {
     }
 }
 
-fn ensure_account(d: &crate::store::Data, expected: &str) -> Result<(), String> {
+fn ensure_account(d: &crate::store::Data, expected: &str) -> Result<(), crate::error::ApiError> {
     if expected.is_empty() || crate::accounts::uid(d) != expected {
         Err("账号已切换，未修改照片".into())
     } else {
@@ -579,14 +597,18 @@ mod account_guard_tests {
     #[test]
     fn stale_account_cannot_modify_photos() {
         let mut d = crate::store::Data::default();
-        d.account = json!({"uid":"B"});
+        d.account = serde_json::from_value(json!({"uid":"B"})).unwrap();
         assert!(ensure_account(&d, "A").is_err());
         assert!(ensure_account(&d, "").is_err());
         assert!(ensure_account(&d, "B").is_ok());
     }
 }
 
-pub(crate) fn run_photos(store: &Store, uid: &str) -> Result<Vec<(Vec<u8>, String)>, String> {
+pub(crate) fn run_photos(
+    store: &Store,
+    uid: &str,
+) -> Result<Vec<(Vec<u8>, String)>, crate::error::ApiError> {
+    let _files = store.files.lock().map_err(|_| "照片库正在处理")?;
     let d = store.data.lock().map_err(|_| "数据不可用")?;
     ensure_account(&d, uid)?;
     files(&directory(store, uid)?)?
@@ -607,14 +629,19 @@ pub(crate) fn run_photos(store: &Store, uid: &str) -> Result<Vec<(Vec<u8>, Strin
         .collect()
 }
 
-pub(crate) fn photo_names(store: &Store, uid: &str) -> Result<Vec<String>, String> {
+pub(crate) fn photo_names(store: &Store, uid: &str) -> Result<Vec<String>, crate::error::ApiError> {
+    let _files = store.files.lock().map_err(|_| "照片库正在处理")?;
     Ok(files(&directory(store, uid)?)?
         .iter()
         .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
         .collect())
 }
 #[tauri::command]
-pub fn face_reference_remove(uid: String, store: tauri::State<Store>) -> Result<(), String> {
+pub fn face_reference_remove(
+    uid: String,
+    store: tauri::State<Store>,
+) -> Result<(), crate::error::ApiError> {
+    let _files = store.files.lock().map_err(|_| "照片库正在处理")?;
     let d = store.data.lock().map_err(|_| "数据不可用")?;
     ensure_account(&d, &uid)?;
     clear_reference(&store, &uid)

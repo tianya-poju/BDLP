@@ -14,12 +14,12 @@ pub(crate) fn cfg() -> Value {
 fn md5(s: &str) -> String {
     format!("{:x}", Md5::digest(s.as_bytes()))
 }
-pub(crate) fn encrypt(text: &str, key: &str, iv: &str) -> Result<String, String> {
+pub(crate) fn encrypt(text: &str, key: &str, iv: &str) -> Result<String, crate::error::ApiError> {
     let e = cbc::Encryptor::<aes::Aes128>::new_from_slices(key.as_bytes(), iv.as_bytes())
         .map_err(|_| "加密参数无效")?;
     Ok(B64.encode(e.encrypt_padded_vec_mut::<Pkcs7>(text.as_bytes())))
 }
-pub(crate) fn decrypt(text: &str, key: &str, iv: &str) -> Result<String, String> {
+pub(crate) fn decrypt(text: &str, key: &str, iv: &str) -> Result<String, crate::error::ApiError> {
     let bytes = B64
         .decode(text.split_whitespace().collect::<String>())
         .map_err(|_| "响应编码无效")?;
@@ -47,24 +47,45 @@ fn sign(p: &BTreeMap<String, String>, protected: bool, login: bool) -> String {
         md5(&format!("{body}{}", c["SALT_N"].as_str().unwrap()))
     }
 }
-pub(crate) fn text(v: &Value, key: &str) -> String {
-    match &v[key] {
+pub(crate) fn text<T: serde::Serialize + ?Sized>(v: &T, key: &str) -> String {
+    let value = serde_json::to_value(v).unwrap_or(Value::Null);
+    match &value[key] {
         Value::String(s) => s.clone(),
         Value::Number(n) => n.to_string(),
         _ => String::new(),
     }
 }
 pub(crate) fn same_account(a: &Data, b: &Data) -> bool {
-    a.account["uid"] == b.account["uid"] && a.account["token"] == b.account["token"]
+    a.account.uid == b.account.uid && a.account.token == b.account.token
 }
-pub(crate) fn snapshot(store: &Store) -> Result<Data, String> {
+pub(crate) fn snapshot(store: &Store) -> Result<Data, crate::error::ApiError> {
     store
         .data
         .lock()
-        .map(|d| d.clone())
+        .map(|d| (*d).clone())
         .map_err(|_| "本地数据不可用".into())
 }
-fn checked(v: Value) -> Result<Value, String> {
+fn client(login: bool) -> &'static reqwest::Client {
+    static BUSINESS: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    static LOGIN: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    let pool = if login { &LOGIN } else { &BUSINESS };
+    pool.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(25))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("fixed HTTP client configuration")
+    })
+}
+const RESPONSE_LIMIT: usize = 8 * 1024 * 1024;
+fn append_response(bytes: &mut Vec<u8>, chunk: &[u8]) -> Result<(), crate::error::ApiError> {
+    if bytes.len().saturating_add(chunk.len()) > RESPONSE_LIMIT {
+        return Err(crate::error::ApiError::invalid("服务响应过大"));
+    }
+    bytes.extend_from_slice(chunk);
+    Ok(())
+}
+fn checked(v: Value) -> Result<Value, crate::error::ApiError> {
     if v["status"].as_i64() == Some(1) || v["status"].as_str() == Some("1") {
         Ok(v)
     } else {
@@ -74,14 +95,22 @@ fn checked(v: Value) -> Result<Value, String> {
         } else {
             ""
         };
-        Err(serde_json::json!({"kind":if status=="101"||status=="102"{"auth_expired"}else{"business"},"message":format!("服务端拒绝请求：{}（{}）{}",text(&v,"info"),status,hint),"code":status}).to_string())
+        Err(crate::error::ApiError {
+            kind: if status == "101" || status == "102" {
+                crate::error::ErrorKind::AuthExpired
+            } else {
+                crate::error::ErrorKind::Business
+            },
+            message: format!("服务端拒绝请求：{}（{}）{}", text(&v, "info"), status, hint),
+            code: Some(status),
+        })
     }
 }
 fn encode_form(
     mut p: BTreeMap<String, String>,
     endpoint: &str,
     n: u32,
-) -> Result<BTreeMap<String, String>, String> {
+) -> Result<BTreeMap<String, String>, crate::error::ApiError> {
     let c = cfg();
     let login = endpoint == "Login/quickLoginV339";
     let encrypted = login || endpoint == "Run2/beforeRunV260" || endpoint == "report/getOssSts";
@@ -153,7 +182,7 @@ pub(crate) async fn call(
     endpoint: &str,
     extra: BTreeMap<String, String>,
     nonce: Option<u32>,
-) -> Result<Value, String> {
+) -> Result<Value, crate::error::ApiError> {
     call_with_clock(d, endpoint, extra, nonce, 0).await
 }
 pub(crate) async fn call_with_clock(
@@ -162,7 +191,7 @@ pub(crate) async fn call_with_clock(
     extra: BTreeMap<String, String>,
     nonce: Option<u32>,
     clock: i64,
-) -> Result<Value, String> {
+) -> Result<Value, crate::error::ApiError> {
     let c = cfg();
     let n = nonce.unwrap_or_else(|| 100000 + (uuid::Uuid::new_v4().as_u128() % 900000) as u32);
     let now = SystemTime::now()
@@ -181,50 +210,59 @@ pub(crate) async fn call_with_clock(
         ("ostype", "1".into()),
         ("school_id", d.school_id.clone()),
         ("uid", {
-            let u = text(a, "uid");
+            let u = a.uid.clone();
             if u.is_empty() {
                 "1".into()
             } else {
                 u
             }
         }),
-        ("token", text(a, "token")),
+        ("token", a.token.clone()),
         ("timestamp", now.to_string()),
         ("nonce", n.to_string()),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
     .collect();
-    let student = text(a, "studentNum");
+    let student = a.student_num.clone().unwrap_or_default();
     if !student.is_empty() {
         p.insert("student_num".into(), student);
     }
     p.extend(extra);
     let form = encode_form(p, endpoint, n)?;
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(25))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|_| "无法初始化网络")?;
-    let response = client
+    let client = client(endpoint == "Login/quickLoginV339");
+    let mut response = client
         .post(format!("https://api2.lptiyu.com/v3/api.php/{endpoint}"))
         .header("User-Agent", "okhttp/3.12")
         .form(&form)
         .send()
         .await
         .map_err(|e| {
-            if e.is_timeout() {
+            crate::error::ApiError::network(if e.is_timeout() {
                 "请求超时，请检查网络"
             } else {
                 "无法连接乐跑服务，请检查网络"
-            }
+            })
         })?;
     if !response.status().is_success() {
-        return Err(format!("乐跑服务 HTTP {}", response.status().as_u16()));
+        return Err(crate::error::ApiError::network(format!(
+            "乐跑服务 HTTP {}",
+            response.status().as_u16()
+        )));
     }
-    let bytes = response.bytes().await.map_err(|_| "响应读取失败")?;
-    if bytes.len() > 8 * 1024 * 1024 {
-        return Err("服务响应过大".into());
+    if response
+        .content_length()
+        .is_some_and(|n| n > RESPONSE_LIMIT as u64)
+    {
+        return Err(crate::error::ApiError::invalid("服务响应过大"));
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| crate::error::ApiError::network("响应读取失败"))?
+    {
+        append_response(&mut bytes, &chunk)?;
     }
     let mut v: Value = serde_json::from_slice(&bytes).map_err(|_| "服务返回的不是有效 JSON")?;
     if v["is_encrypt"].as_i64() == Some(1) || v["is_encrypt"].as_str() == Some("1") {
@@ -251,7 +289,7 @@ pub(crate) async fn finish(
     token: String,
     login_type: &str,
     cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-) -> Result<(), String> {
+) -> Result<(), crate::error::ApiError> {
     let store = app.state::<Store>();
     let mut d = snapshot(&store)?;
     crate::store::apply_pending(&mut d);
@@ -278,7 +316,7 @@ pub(crate) async fn finish(
         return Err("登录响应缺少有效账号信息".into());
     }
     d.school_id = text(a, "school_id");
-    d.account = json!({"uid":uid,"token":token,"studentNum":text(a,"student_num"),"loginType":if login_type=="3"{"wechat"}else{"qq"}});
+    d.account = serde_json::from_value(json!({"uid":uid,"token":token,"studentNum":text(a,"student_num"),"loginType":if login_type=="3"{"wechat"}else{"qq"}})).unwrap();
     let profile = call(&d, "User/User", BTreeMap::new(), None).await?;
     let user = &profile["data"];
     let name = text(user, "real_name");
@@ -292,9 +330,9 @@ pub(crate) async fn finish(
     } else {
         name
     };
-    d.account["realName"] = json!(name);
-    d.account["nickname"] = json!(text(user, "nick_name"));
-    d.account["studentNum"] = json!(text(user, "student_num"));
+    d.account.real_name = Some(name);
+    d.account.nickname = Some(text(user, "nick_name"));
+    d.account.student_num = Some(text(user, "student_num"));
     let sid = text(user, "school_id");
     if !sid.is_empty() {
         d.school_id = sid
@@ -310,11 +348,11 @@ pub(crate) async fn finish(
         }
     }
     d.school_name = text(user, "school_name");
-    store.try_update(|v|{if cancel.as_ref().is_some_and(|c|c.load(std::sync::atomic::Ordering::SeqCst)){return Err("已取消登录".into())}crate::accounts::save_active(v);if let Some(existing)=v.profiles.get(&uid).cloned(){if existing.school_id==d.school_id{v.route=existing.route;v.zone=existing.zone;}else{v.route.clear();v.zone=Value::Null;}v.run_config=existing.run_config;d.account["label"]=existing.account["label"].clone();}else{v.route.clear();v.zone=Value::Null;v.run_config=Value::Null;}let entry=json!({"id":d.device_id,"model":crate::store::device_view(&d)["model"],"osVersion":crate::store::device_view(&d)["osVersion"],"uid":uid,"time":SystemTime::now().duration_since(UNIX_EPOCH).map(|t|t.as_millis() as u64).unwrap_or(0)});v.device_history.retain(|h|h["id"]!=entry["id"]);v.device_history.insert(0,entry);v.device_history.truncate(6);v.device_id=d.device_id;v.device=d.device;v.pending_device=Value::Null;v.account=d.account;v.school_id=d.school_id;v.school_name=d.school_name;Ok(())})?;
+    store.try_update(|v|{if cancel.as_ref().is_some_and(|c|c.load(std::sync::atomic::Ordering::SeqCst)){return Err("已取消登录".into())}crate::accounts::save_active(v);if let Some(existing)=v.profiles.get(&uid).cloned(){if existing.school_id==d.school_id{v.route=existing.route;v.zone=existing.zone;}else{v.route.clear();v.zone=Default::default();}v.run_config=existing.run_config;d.account.label=existing.account.label.clone();}else{v.route.clear();v.zone=Default::default();v.run_config=Default::default();}let entry=json!({"id":d.device_id,"model":crate::store::device_view(&d)["model"],"osVersion":crate::store::device_view(&d)["osVersion"],"uid":uid,"time":SystemTime::now().duration_since(UNIX_EPOCH).map(|t|t.as_millis() as u64).unwrap_or(0)});v.device_history.retain(|h|h["id"]!=entry["id"]);v.device_history.insert(0,entry);v.device_history.truncate(6);v.device_id=d.device_id;v.device=d.device;v.pending_device=Default::default();v.account=d.account;v.school_id=d.school_id;v.school_name=d.school_name;Ok(())})?;
     Ok(())
 }
 #[tauri::command]
-pub async fn qq_login_start(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn qq_login_start(app: tauri::AppHandle) -> Result<(), crate::error::ApiError> {
     let store = app.state::<Store>();
     store.update(|d| {
         if d.device_id.is_empty() {
@@ -364,7 +402,7 @@ pub async fn qq_login_start(app: tauri::AppHandle) -> Result<(), String> {
                         let result = finish(h.clone(), id, token, "2", None).await;
                         let payload = match result {
                             Ok(_) => json!({"ok":true}),
-                            Err(e) => json!({"ok":false,"error":e}),
+                            Err(e) => json!({"ok":false,"error":e.message}),
                         };
                         let _ = h.emit_to("main", "login-result", payload);
                         if let Some(w) = h.get_webview_window("qq-login") {
@@ -388,8 +426,8 @@ async fn network_read_inner(
     params: Value,
     store: tauri::State<'_, Store>,
     d: Data,
-) -> Result<Value, String> {
-    if text(&d.account, "token").is_empty() {
+) -> Result<Value, crate::error::ApiError> {
+    if d.account.token.clone().is_empty() {
         return Err("请先登录账号".into());
     }
     let (endpoint, extra) = match kind.as_str() {
@@ -470,8 +508,8 @@ async fn network_read_inner(
         let u = &reply["data"];
         store.update(|v| {
             if same_account(v, &d) {
-                v.account["realName"] = json!(text(u, "name"));
-                v.account["studentNum"] = json!(text(u, "student_num"));
+                v.account.real_name = Some(text(u, "name"));
+                v.account.student_num = Some(text(u, "student_num"));
                 let school = text(u, "school_name");
                 if !school.is_empty() {
                     v.school_name = school.clone();
@@ -497,9 +535,9 @@ async fn network_read_inner(
                 fence.iter().map(|p| p[1]).sum::<f64>() / fence.len() as f64
             ])
         };
-        let zone = json!({"id":({let id=text(data,"game_id");if id.is_empty(){text(data,"run_zone_id")}else{id}}),"name":text(data,"run_zone_name"),"fence":fence,"center":center});
+        let zone = serde_json::from_value(json!({"id":({let id=text(data,"game_id");if id.is_empty(){text(data,"run_zone_id")}else{id}}),"name":text(data,"run_zone_name"),"fence":fence,"center":center})).unwrap();
         store.update(|v| {
-            if same_account(v, &d) && v.school_id == d.school_id && v.zone["id"] == d.zone["id"] {
+            if same_account(v, &d) && v.school_id == d.school_id && v.zone.id == d.zone.id {
                 v.zone = zone
             }
         })?;
@@ -575,7 +613,7 @@ mod live_checks {
         let path = crate::data_root::root().unwrap().join("settings.dpapi");
         let store = Store::open(path).unwrap();
         let d = snapshot(&store).unwrap();
-        assert!(!text(&d.account, "token").is_empty(), "需要用户已登录");
+        assert!(!d.account.token.clone().is_empty(), "需要用户已登录");
         tauri::async_runtime::block_on(async {
             for endpoint in ["User/User", "Run2/beforeRunV260", "RunStat/getAllScore"] {
                 let extra = if endpoint.contains("beforeRun") {
@@ -730,12 +768,25 @@ mod live_term_schema {
 mod response_guard_tests {
     use super::*;
     #[test]
+    fn response_stream_stops_before_extending_over_limit() {
+        let mut bytes = vec![0; RESPONSE_LIMIT - 1];
+        append_response(&mut bytes, &[1]).unwrap();
+        assert!(append_response(&mut bytes, &[2]).is_err());
+        assert_eq!(bytes.len(), RESPONSE_LIMIT);
+    }
+    #[test]
+    fn login_and_business_pools_are_distinct_and_reused() {
+        assert!(std::ptr::eq(client(false), client(false)));
+        assert!(std::ptr::eq(client(true), client(true)));
+        assert!(!std::ptr::eq(client(false), client(true)));
+    }
+    #[test]
     fn same_uid_with_new_token_is_a_different_request_owner() {
         let mut a = Data::default();
-        a.account = json!({"uid":"a","token":"first"});
+        a.account = serde_json::from_value(json!({"uid":"a","token":"first"})).unwrap();
         let mut b = a.clone();
         assert!(same_account(&a, &b));
-        b.account["token"] = json!("second");
+        b.account.token = "second".to_string();
         assert!(!same_account(&a, &b));
     }
 }

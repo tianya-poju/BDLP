@@ -1,14 +1,20 @@
 {
   "name": "budao-lepao-build",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "scripts": {
     "build:frontend": "node tools/build-frontend.cjs",
-    "test": "node tools/build-frontend.cjs && node --test tests/*.test.mjs"
+    "test": "node tools/build-frontend.cjs && node --test tests/*.test.mjs",
+    "lint": "eslint frontend",
+    "format": "prettier --write \"frontend/js/**/*.js\" \"frontend/*.js\" \"frontend/css/*.css\" \"frontend/*.css\"",
+    "format:check": "prettier --check \"frontend/js/**/*.js\" \"frontend/*.js\" \"frontend/css/*.css\" \"frontend/*.css\""
   },
   "devDependencies": {
     "@amap/amap-jsapi-loader": "1.0.1",
-    "esbuild": "0.25.12"
+    "esbuild": "0.25.12",
+    "eslint": "9.39.1",
+    "globals": "16.5.0",
+    "prettier": "3.6.2"
   },
   "type": "module"
 }

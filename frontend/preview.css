@@ -1,26 +1,197 @@
-#app { min-height:100vh }  .app-main { min-height:100vh } .preview-card { background:white; border-radius:16px; padding:22px; } .preview-note { color:#935c00; background:#fff5df; border-radius:12px; padding:14px; line-height:1.6; } .preview-input { font:inherit; padding:10px 12px; border:1px solid #c5c9d0; border-radius:8px; width:100%; max-width:420px; } .preview-list { padding-left:22px; line-height:2; max-height:360px; overflow:auto; } .preview-title { font-size:28px; font-weight:700; margin:0 0 16px; } .preview-muted { color:#6b6f77; line-height:1.7; }  @media(max-width:720px) { .app-rail {width:150px;padding:12px 8px;} .app-main {padding:18px 12px;} }
-
-/* Preserve the recovered sidebar sizing, spacing, icons and selected state. */
-@media(max-width:899px){.app-rail{display:flex;flex-direction:column;position:sticky;top:0;height:100dvh;width:190px;flex:none;padding:16px 12px;background:rgba(242,242,247,.72);border-right:1px solid var(--line);overflow:auto}.rail-item{display:flex;align-items:center;gap:12px;padding:10px 12px;border:0;background:none;border-radius:12px;text-align:left;font:inherit}.rail-item svg{width:20px;height:20px}.rail-item[aria-current=page]{background:#fff;color:var(--accent-text);box-shadow:var(--shadow-raised)}.rail-account{padding:12px;background:#fff;border-radius:16px}.ra-line{display:flex;justify-content:space-between;margin-bottom:8px}.ra-k{color:var(--text-dim)}.rail-label{padding:12px;color:var(--text-mute);font-size:12px}}
-.route-tools{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.rail-item>span{min-width:0}.preview-card{box-shadow:var(--shadow-card);border:1px solid var(--line)}
-
-.desktop-content{display:flex;flex-direction:column;gap:18px;width:100%;min-width:0}
-
-/* Desktop route editor: equally sized map and controls, independent of panel content. */
-@media(min-width:900px){
- .fullpage-body.split.route-editor-layout>.map-wrap{flex:0 0 50%;width:50%;min-width:0;}
- .fullpage-body.split.route-editor-layout>.fullpage-panel{flex:0 0 50%;width:50%;min-width:0;box-sizing:border-box;}
+#app {
+  min-height: 100vh;
+}
+.app-main {
+  min-height: 100vh;
+}
+.preview-card {
+  background: white;
+  border-radius: 16px;
+  padding: 22px;
+}
+.preview-note {
+  color: #935c00;
+  background: #fff5df;
+  border-radius: 12px;
+  padding: 14px;
+  line-height: 1.6;
+}
+.preview-input {
+  font: inherit;
+  padding: 10px 12px;
+  border: 1px solid #c5c9d0;
+  border-radius: 8px;
+  width: 100%;
+  max-width: 420px;
+}
+.preview-list {
+  padding-left: 22px;
+  line-height: 2;
+  max-height: 360px;
+  overflow: auto;
+}
+.preview-title {
+  font-size: 28px;
+  font-weight: 700;
+  margin: 0 0 16px;
+}
+.preview-muted {
+  color: #6b6f77;
+  line-height: 1.7;
+}
+@media (max-width: 720px) {
+  .app-rail {
+    width: 150px;
+    padding: 12px 8px;
+  }
+  .app-main {
+    padding: 18px 12px;
+  }
 }
 
-.map-status{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:20px;background:var(--bg);color:var(--text-mute);text-align:center;z-index:20;pointer-events:none}
+/* Preserve the recovered sidebar sizing, spacing, icons and selected state. */
+@media (max-width: 899px) {
+  .app-rail {
+    display: flex;
+    flex-direction: column;
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+    width: 190px;
+    flex: none;
+    padding: 16px 12px;
+    background: rgba(242, 242, 247, 0.72);
+    border-right: 1px solid var(--line);
+    overflow: auto;
+  }
+  .rail-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 0;
+    background: none;
+    border-radius: 12px;
+    text-align: left;
+    font: inherit;
+  }
+  .rail-item svg {
+    width: 20px;
+    height: 20px;
+  }
+  .rail-item[aria-current="page"] {
+    background: #fff;
+    color: var(--accent-text);
+    box-shadow: var(--shadow-raised);
+  }
+  .rail-account {
+    padding: 12px;
+    background: #fff;
+    border-radius: 16px;
+  }
+  .ra-line {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .ra-k {
+    color: var(--text-dim);
+  }
+  .rail-label {
+    padding: 12px;
+    color: var(--text-mute);
+    font-size: 12px;
+  }
+}
+.route-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+.rail-item > span {
+  min-width: 0;
+}
+.preview-card {
+  box-shadow: var(--shadow-card);
+  border: 1px solid var(--line);
+}
+
+.desktop-content {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 100%;
+  min-width: 0;
+}
+
+/* Desktop route editor: equally sized map and controls, independent of panel content. */
+@media (min-width: 900px) {
+  .fullpage-body.split.route-editor-layout > .map-wrap {
+    flex: 0 0 50%;
+    width: 50%;
+    min-width: 0;
+  }
+  .fullpage-body.split.route-editor-layout > .fullpage-panel {
+    flex: 0 0 50%;
+    width: 50%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+}
+
+.map-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: var(--bg);
+  color: var(--text-mute);
+  text-align: center;
+  z-index: 20;
+  pointer-events: none;
+}
 
 /* Keep the map independent of the number of checkpoint diagnostics. */
-.modal.route-preview-modal{max-width:960px;max-height:88dvh;}
-.route-preview-modal .modal-head,.route-preview-modal .modal-foot{flex-shrink:0;}
-.route-preview-modal .modal-body{flex:1 1 auto;min-height:0;overflow-y:auto;}
-.route-preview-modal .modal-body>*{flex-shrink:0;}
-.route-preview-map{height:clamp(280px,48dvh,540px);min-height:280px;flex:none;}
-.route-preview-issues:empty{display:none;}
-.route-preview-issues{display:flex;flex-direction:column;gap:6px;}
-.route-preview-details summary{cursor:pointer;color:var(--accent-text);padding:6px 0;}
-.route-preview-detail-scroll{max-height:200px;overflow-y:auto;overscroll-behavior:contain;padding-top:8px;}
+.modal.route-preview-modal {
+  max-width: 960px;
+  max-height: 88dvh;
+}
+.route-preview-modal .modal-head,
+.route-preview-modal .modal-foot {
+  flex-shrink: 0;
+}
+.route-preview-modal .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.route-preview-modal .modal-body > * {
+  flex-shrink: 0;
+}
+.route-preview-map {
+  height: clamp(280px, 48dvh, 540px);
+  min-height: 280px;
+  flex: none;
+}
+.route-preview-issues:empty {
+  display: none;
+}
+.route-preview-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.route-preview-details summary {
+  cursor: pointer;
+  color: var(--accent-text);
+  padding: 6px 0;
+}
+.route-preview-detail-scroll {
+  max-height: 200px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-top: 8px;
+}

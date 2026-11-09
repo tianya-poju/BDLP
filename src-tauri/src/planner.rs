@@ -50,6 +50,7 @@ pub struct Candidate {
     pub cache_hits: usize,
     pub anchor_count: usize,
     pub jitter_max_m: f64,
+    pub sampling_rules: Option<Value>,
 }
 #[derive(Clone)]
 struct Saved {
@@ -58,6 +59,7 @@ struct Saved {
     checkpoints: Vec<Checkpoint>,
     fence: Vec<[f64; 2]>,
     minimum: f64,
+    sampling_rules: Value,
 }
 struct Pending {
     created: std::time::Instant,
@@ -73,19 +75,21 @@ fn fresh(p: &Pending, id: &str) -> bool {
 pub struct Plans(Mutex<Option<Pending>>);
 fn context(d: &Data) -> Value {
     json!([
-        d.account["uid"],
-        d.account["token"],
+        d.account.uid,
+        d.account.token,
         d.school_id,
-        d.zone["id"]
+        d.zone.id,
+        d.run_config,
+        d.device_id
     ])
 }
-fn current(d: &Data, c: &Value) -> Result<(), String> {
+fn current(d: &Data, c: &Value) -> Result<(), crate::error::ApiError> {
     if &context(d) != c {
         return Err("账号或跑区已改变，请重新规划".into());
     }
     Ok(())
 }
-fn check(c: &AtomicBool) -> Result<(), String> {
+fn check(c: &AtomicBool) -> Result<(), crate::error::ApiError> {
     if c.load(Ordering::Relaxed) {
         Err("规划已取消".into())
     } else {
@@ -99,7 +103,7 @@ pub(crate) fn distance(a: [f64; 2], b: [f64; 2]) -> f64 {
         + a[0].to_radians().cos() * b[0].to_radians().cos() * (q / 2.).sin().powi(2);
     6371000. * 2. * h.clamp(0., 1.).sqrt().asin()
 }
-fn parse_points(v: &Value) -> Result<Vec<Checkpoint>, String> {
+fn parse_points(v: &Value) -> Result<Vec<Checkpoint>, crate::error::ApiError> {
     let a = v["data"]["point_list"]
         .as_array()
         .or_else(|| v["data"]["pointList"].as_array())
@@ -145,7 +149,10 @@ fn parse_points(v: &Value) -> Result<Vec<Checkpoint>, String> {
     out.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(out)
 }
-fn tour(points: &[[f64; 2]], cancel: &AtomicBool) -> Result<(Vec<usize>, bool), String> {
+fn tour(
+    points: &[[f64; 2]],
+    cancel: &AtomicBool,
+) -> Result<(Vec<usize>, bool), crate::error::ApiError> {
     let n = points.len();
     if n < 2 {
         return Err("至少需要两个不同位置才能形成闭环".into());
@@ -316,7 +323,7 @@ fn calculate(
     fence: &[[f64; 2]],
     minimum: f64,
     cancel: &AtomicBool,
-) -> Result<Candidate, String> {
+) -> Result<Candidate, crate::error::ApiError> {
     let mut pts = vec![];
     for cp in cps {
         if !pts.contains(&cp.point) {
@@ -354,6 +361,7 @@ fn calculate(
         cache_hits: 0,
         anchor_count: 0,
         jitter_max_m: 0.,
+        sampling_rules: None,
         outside_segments: outside,
         fence: fence.to_vec(),
         fence_available: fence.len() >= 3,
@@ -388,7 +396,10 @@ fn minimum_distance(r: &Value) -> f64 {
     }
     0.
 }
-async fn pending<F: std::future::Future>(cancel: &AtomicBool, f: F) -> Result<F::Output, String> {
+async fn pending<F: std::future::Future>(
+    cancel: &AtomicBool,
+    f: F,
+) -> Result<F::Output, crate::error::ApiError> {
     let mut f = Box::pin(f);
     loop {
         check(cancel)?;
@@ -402,9 +413,9 @@ async fn pending<F: std::future::Future>(cancel: &AtomicBool, f: F) -> Result<F:
 async fn fetch(
     d: &Data,
     cancel: &AtomicBool,
-) -> Result<(Vec<Checkpoint>, Vec<[f64; 2]>, f64), String> {
-    let zone = text(&d.zone, "id");
-    if zone.is_empty() || text(&d.account, "token").is_empty() {
+) -> Result<(Vec<Checkpoint>, Vec<[f64; 2]>, f64, Value), crate::error::ApiError> {
+    let zone = d.zone.id.clone();
+    if zone.is_empty() || d.account.token.clone().is_empty() {
         return Err("请先登录并选择跑区".into());
     }
     let rules = pending(
@@ -438,7 +449,12 @@ async fn fetch(
         return Err("学校围栏数据无效，不能安全检查越界".into());
     }
     let minimum = minimum_distance(r);
-    Ok((cps, f, minimum))
+    Ok((
+        cps,
+        f,
+        minimum,
+        json!({"android_gps_max_distance":r["android_gps_max_distance"]}),
+    ))
 }
 fn offset(anchor: [f64; 2], dx: f64, dy: f64) -> [f64; 2] {
     let p = [
@@ -457,7 +473,7 @@ fn straight_candidate(
     fence: &[[f64; 2]],
     minimum: f64,
     cancel: &AtomicBool,
-) -> Result<Candidate, String> {
+) -> Result<Candidate, crate::error::ApiError> {
     let base = calculate(id, cps, fence, minimum, cancel)?;
     let anchors = base.points[..base.points.len() - 1].to_vec();
     let n = anchors.len();
@@ -540,7 +556,7 @@ fn assess(
     fence: &[[f64; 2]],
     segments: Vec<Vec<[f64; 2]>>,
     continuous: bool,
-) -> Result<Candidate, String> {
+) -> Result<Candidate, crate::error::ApiError> {
     let mut points = vec![];
     let mut outside = vec![];
     let mut meters = 0.;
@@ -610,7 +626,7 @@ async fn roads(
     cancel: Arc<AtomicBool>,
     progress: Arc<Mutex<crate::amap::RoadProgress>>,
     started: std::time::Instant,
-) -> Result<Candidate, String> {
+) -> Result<Candidate, crate::error::ApiError> {
     let nodes = candidate.points.clone();
     let n = nodes.len() - 1;
     {
@@ -671,7 +687,7 @@ async fn roads(
 pub fn route_plan_status(
     id: String,
     plans: tauri::State<Plans>,
-) -> Result<crate::amap::RoadProgress, String> {
+) -> Result<crate::amap::RoadProgress, crate::error::ApiError> {
     let p = plans.0.lock().map_err(|_| "规划状态不可用")?;
     let p = p
         .as_ref()
@@ -685,7 +701,7 @@ pub async fn route_plan(
     id: String,
     store: tauri::State<'_, Store>,
     plans: tauri::State<'_, Plans>,
-) -> Result<Candidate, String> {
+) -> Result<Candidate, crate::error::ApiError> {
     uuid::Uuid::parse_str(&id).map_err(|_| "规划请求 ID 无效")?;
     let cancel = Arc::new(AtomicBool::new(false));
     let progress = Arc::new(Mutex::new(crate::amap::RoadProgress {
@@ -707,17 +723,18 @@ pub async fn route_plan(
     }
     let d = network::snapshot(&store)?;
     let ctx = context(&d);
-    let (cps, fence, minimum) = fetch(&d, &cancel).await?;
+    let (cps, fence, minimum, sampling_rules) = fetch(&d, &cancel).await?;
     check(&cancel)?;
     let cp = cps.clone();
     let f = fence.clone();
     let c = cancel.clone();
     let ident = id.clone();
-    let candidate = tauri::async_runtime::spawn_blocking(move || {
+    let mut candidate = tauri::async_runtime::spawn_blocking(move || {
         straight_candidate(ident, &cp, &f, minimum, &c)
     })
     .await
     .map_err(|_| "规划计算失败")??;
+    candidate.sampling_rules = Some(sampling_rules.clone());
     {
         let mut p = progress.lock().map_err(|_| "规划状态不可用")?;
         p.phase = "直线闭环与点位覆盖检查完成".into();
@@ -734,11 +751,15 @@ pub async fn route_plan(
         checkpoints: cps,
         fence,
         minimum,
+        sampling_rules,
     });
     Ok(candidate)
 }
 #[tauri::command]
-pub fn route_plan_cancel(id: String, plans: tauri::State<Plans>) -> Result<(), String> {
+pub fn route_plan_cancel(
+    id: String,
+    plans: tauri::State<Plans>,
+) -> Result<(), crate::error::ApiError> {
     let mut p = plans.0.lock().map_err(|_| "规划状态不可用")?;
     if p.as_ref().is_some_and(|p| p.id == id) {
         if let Some(p) = p.take() {
@@ -753,7 +774,7 @@ pub async fn route_plan_apply(
     store: tauri::State<'_, Store>,
     plans: tauri::State<'_, Plans>,
     runs: tauri::State<'_, crate::running::Runs>,
-) -> Result<(), String> {
+) -> Result<(), crate::error::ApiError> {
     crate::running::ensure_idle(&runs)?;
     let (saved, cancel) = {
         let p = plans.0.lock().map_err(|_| "规划状态不可用")?;
@@ -769,8 +790,12 @@ pub async fn route_plan_apply(
     }
     let d = network::snapshot(&store)?;
     current(&d, &saved.context)?;
-    let (cps, fence, minimum) = fetch(&d, &cancel).await?;
-    if cps != saved.checkpoints || fence != saved.fence || minimum != saved.minimum {
+    let (cps, fence, minimum, sampling_rules) = fetch(&d, &cancel).await?;
+    if cps != saved.checkpoints
+        || fence != saved.fence
+        || minimum != saved.minimum
+        || sampling_rules != saved.sampling_rules
+    {
         return Err("打卡点或学校规则已改变，请重新规划".into());
     }
     let mut p = plans.0.lock().map_err(|_| "规划状态不可用")?;
@@ -791,6 +816,20 @@ pub async fn route_plan_apply(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn parameter_device_and_account_changes_invalidate_candidate() {
+        let mut d = Data::default();
+        let c = context(&d);
+        assert!(current(&d, &c).is_ok());
+        d.run_config.straight_speed = Some(4.);
+        assert!(current(&d, &c).is_err());
+        d = Data::default();
+        d.device_id = "changed".into();
+        assert!(current(&d, &c).is_err());
+        d = Data::default();
+        d.account.token = "new-session".into();
+        assert!(current(&d, &c).is_err());
+    }
     fn cp(id: &str, p: [f64; 2]) -> Checkpoint {
         Checkpoint {
             id: id.into(),
@@ -881,9 +920,9 @@ mod tests {
         );
         assert!(parse_points(&json!({"data":{"point_list":[{"jingwei":"1,2"}]}})).is_err());
         let mut d = Data::default();
-        d.account = json!({"uid":"a","token":"old"});
+        d.account = serde_json::from_value(json!({"uid":"a","token":"old"})).unwrap();
         let c = context(&d);
-        d.account["token"] = json!("new");
+        d.account.token = "new".to_string();
         assert!(current(&d, &c).is_err());
     }
 }
@@ -1102,7 +1141,7 @@ mod straight_tests {
         let d = network::snapshot(&store).unwrap();
         let cancel = AtomicBool::new(false);
         let fetched = tauri::async_runtime::block_on(fetch(&d, &cancel));
-        let (cps, fence, minimum) = match fetched {
+        let (cps, fence, minimum, _) = match fetched {
             Ok(v) => v,
             Err(_) => panic!("真实学校规则或打卡点读取失败（请本人检查登录状态和跑区）"),
         };

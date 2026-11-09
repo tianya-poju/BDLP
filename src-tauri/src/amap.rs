@@ -43,7 +43,7 @@ fn now() -> u64 {
         .map(|x| x.as_secs())
         .unwrap_or(0)
 }
-pub(crate) fn parse_paths(v: &Value) -> Result<Vec<Point>, String> {
+pub(crate) fn parse_paths(v: &Value) -> Result<Vec<Point>, crate::error::ApiError> {
     let path = v["route"]["paths"]
         .as_array()
         .and_then(|a| a.first())
@@ -116,7 +116,7 @@ impl Client {
         cancel: Arc<AtomicBool>,
         progress: Arc<Mutex<RoadProgress>>,
         started: Instant,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, crate::error::ApiError> {
         let path = store
             .path
             .parent()
@@ -142,7 +142,7 @@ impl Client {
             progress,
         })
     }
-    fn check(&self) -> Result<(), String> {
+    fn check(&self) -> Result<(), crate::error::ApiError> {
         if self.cancel.load(Ordering::Relaxed) {
             return Err("规划已取消".into());
         }
@@ -151,7 +151,7 @@ impl Client {
         }
         Ok(())
     }
-    async fn wait(&self, d: Duration) -> Result<(), String> {
+    async fn wait(&self, d: Duration) -> Result<(), crate::error::ApiError> {
         let until = Instant::now() + d;
         while Instant::now() < until {
             self.check()?;
@@ -164,7 +164,10 @@ impl Client {
         }
         self.check()
     }
-    async fn pending<F: std::future::Future>(&self, f: F) -> Result<F::Output, String> {
+    async fn pending<F: std::future::Future>(
+        &self,
+        f: F,
+    ) -> Result<F::Output, crate::error::ApiError> {
         let mut f = Box::pin(f);
         loop {
             self.check()?;
@@ -173,7 +176,7 @@ impl Client {
             }
         }
     }
-    pub async fn leg(&mut self, a: Point, b: Point) -> Result<Vec<Point>, String> {
+    pub async fn leg(&mut self, a: Point, b: Point) -> Result<Vec<Point>, crate::error::ApiError> {
         self.check()?;
         let id = format!(
             "walking-v5-joined:{:.6},{:.6}>{:.6},{:.6}",
@@ -244,7 +247,7 @@ impl Client {
             match result {
                 Ok(v) => {
                     if v["status"].as_str() != Some("1") {
-                        return Err(service_error(&v));
+                        return Err(service_error(&v).into());
                     }
                     let points = parse_paths(&v)?;
                     self.cache.0.insert(
@@ -280,7 +283,7 @@ impl Client {
         Err("高德规划失败".into())
     }
     fn save(&self) {
-        let _ = (|| -> Result<(), String> {
+        let _ = (|| -> Result<(), crate::error::ApiError> {
             use std::os::windows::ffi::OsStrExt;
             let b = crate::store::protect(
                 &serde_json::to_vec(&self.cache).map_err(|_| "缓存编码失败")?,
@@ -358,19 +361,19 @@ mod cache_and_limits_tests {
             assert_eq!(progress.lock().unwrap().requests, 0);
             c.cache.0.clear();
             c.budget = 0;
-            assert!(c.leg(a, b).await.unwrap_err().contains("上限"));
+            assert!(c.leg(a, b).await.unwrap_err().message.contains("上限"));
             c.start = Instant::now() - Duration::from_secs(601);
-            assert!(c.check().unwrap_err().contains("10分钟"));
+            assert!(c.check().unwrap_err().message.contains("10分钟"));
             c.start = Instant::now();
             cancel.store(true, Ordering::Relaxed);
-            assert!(c.leg(a, b).await.unwrap_err().contains("取消"));
+            assert!(c.leg(a, b).await.unwrap_err().message.contains("取消"));
         });
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn disconnected_step_data_is_rejected() {
         let v = serde_json::json!({"route":{"paths":[{"steps":[{"polyline":"112,28;112.001,28"},{"polyline":"112.1,28;112.2,28"}]}]}});
-        assert!(parse_paths(&v).unwrap_err().contains("不连续"));
+        assert!(parse_paths(&v).unwrap_err().message.contains("不连续"));
     }
 }
 
@@ -392,7 +395,7 @@ mod inflight_cancel_tests {
             });
             let start = Instant::now();
             let result = c.pending(tokio::time::sleep(Duration::from_secs(60))).await;
-            assert!(result.unwrap_err().contains("取消"));
+            assert!(result.unwrap_err().message.contains("取消"));
             assert!(start.elapsed() < Duration::from_secs(2));
         });
     }

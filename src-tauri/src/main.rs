@@ -3,15 +3,19 @@ mod accounts;
 mod alipay;
 mod amap;
 mod data_root;
+mod deletions;
+mod error;
 mod face_window;
 mod faces;
 mod history;
 mod ipc_policy;
 mod lifecycle;
 mod map_config;
+mod models;
 mod native_runner;
 mod network;
 mod planner;
+mod receipts;
 mod running;
 mod schools;
 mod session;
@@ -26,7 +30,11 @@ struct School {
     id: String,
     name: String,
 }
-fn search_schools(data: &str, query: &str, limit: usize) -> Result<Vec<School>, String> {
+fn search_schools(
+    data: &str,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<School>, crate::error::ApiError> {
     let schools: BTreeMap<String, String> =
         serde_json::from_str(data).map_err(|_| "学校数据无法读取".to_string())?;
     let term = query.trim().to_lowercase();
@@ -45,7 +53,10 @@ fn search_schools(data: &str, query: &str, limit: usize) -> Result<Vec<School>, 
     Ok(out)
 }
 #[tauri::command]
-fn schools_search(query: String, store: tauri::State<store::Store>) -> Result<Vec<School>, String> {
+fn schools_search(
+    query: String,
+    store: tauri::State<store::Store>,
+) -> Result<Vec<School>, crate::error::ApiError> {
     let all = schools::merged(&store)?;
     search_schools(
         &serde_json::to_string(&all).map_err(|_| "学校表无效")?,

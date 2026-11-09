@@ -30,13 +30,13 @@ fn now() -> i64 {
         .unwrap_or_default()
         .as_secs() as i64
 }
-fn uri(d: &Data, position: u8, time: i64) -> Result<String, String> {
-    let value=format!("{{\"uid\":{},\"start_time\":{time},\"position\":{position},\"token\":{},\"school_id\":{}}}",serde_json::to_string(&text(&d.account,"uid")).unwrap(),serde_json::to_string(&text(&d.account,"token")).unwrap(),serde_json::to_string(&d.school_id).unwrap());
+fn uri(d: &Data, position: u8, time: i64) -> Result<String, crate::error::ApiError> {
+    let value=format!("{{\"uid\":{},\"start_time\":{time},\"position\":{position},\"token\":{},\"school_id\":{}}}",serde_json::to_string(&d.account.uid.clone()).unwrap(),serde_json::to_string(&d.account.token.clone()).unwrap(),serde_json::to_string(&d.school_id).unwrap());
     let encrypted = network::encrypt(&value, "tG8xUo2fRq4nYvZ1", "Mw5eHp7jLs9BzXcK")?;
     let enc = |s: &str| url::form_urlencoded::byte_serialize(s.as_bytes()).collect::<String>();
     Ok(format!("alipays://platformapi/startapp?appId=2021006131634466&thirdPartSchema=lptiyu://&page={}&query=data={}",enc("pages/login/index"),enc(&encrypted)))
 }
-async fn notify(d: &Data, status: u8, time: i64) -> Result<(), String> {
+async fn notify(d: &Data, status: u8, time: i64) -> Result<(), crate::error::ApiError> {
     network::call(
         d,
         "Run2/updateZfbStatus",
@@ -54,18 +54,18 @@ pub async fn create(
     d: &Data,
     position: u8,
     dry: bool,
-) -> Result<Value, String> {
+) -> Result<Value, crate::error::ApiError> {
     if position > 2 {
         return Err("核验阶段无效".into());
     }
-    let uid = text(&d.account, "uid");
-    if uid.is_empty() || text(&d.account, "token").is_empty() || d.school_id.is_empty() {
+    let uid = d.account.uid.clone();
+    if uid.is_empty() || d.account.token.clone().is_empty() || d.school_id.is_empty() {
         return Err("请先登录并选择学校".into());
     }
     let clock = if dry {
         0
     } else {
-        let zone = text(&d.zone, "id");
+        let zone = d.zone.id.clone();
         if zone.is_empty() {
             return Err("请先选择跑区，再发起正式核验".into());
         }
@@ -96,7 +96,7 @@ pub async fn create(
                 uid.clone(),
                 Ticket {
                     uid,
-                    token: text(&d.account, "token"),
+                    token: d.account.token.clone(),
                     school: d.school_id.clone(),
                     position,
                     time,
@@ -110,13 +110,17 @@ pub async fn create(
         .lock()
         .map_err(|_| "拉起状态不可用")?
         .insert(
-            format!("{}:{}", text(&d.account, "uid"), text(&d.account, "token")),
+            format!("{}:{}", d.account.uid.clone(), d.account.token.clone()),
             url.clone(),
         );
     Ok(json!({"status":1,"url":url,"position":position,"startTime":time,"dryRun":dry}))
 }
-pub async fn check(app: &tauri::AppHandle, d: &Data, position: u8) -> Result<Value, String> {
-    let uid = text(&d.account, "uid");
+pub async fn check(
+    app: &tauri::AppHandle,
+    d: &Data,
+    position: u8,
+) -> Result<Value, crate::error::ApiError> {
+    let uid = d.account.uid.clone();
     let t = app
         .state::<Tickets>()
         .0
@@ -124,16 +128,25 @@ pub async fn check(app: &tauri::AppHandle, d: &Data, position: u8) -> Result<Val
         .map_err(|_| "核验会话不可用")?
         .get(&uid)
         .cloned()
-        .ok_or("还没有发起过刷脸，请先点去刷脸")?;
+        .ok_or_else(|| {
+            crate::error::ApiError::new(
+                crate::error::ErrorKind::VerificationPending,
+                "还没有发起过刷脸，请先点去刷脸",
+            )
+        })?;
     if t.uid != uid
-        || t.token != text(&d.account, "token")
+        || t.token != d.account.token.clone()
         || t.school != d.school_id
         || t.position != position
     {
-        return Err("核验阶段或账号不匹配，请重新发起".into());
+        return Err(crate::error::ApiError::invalid(
+            "核验阶段或账号不匹配，请重新发起",
+        ));
     }
     if now() + t.clock - t.time > if position == 0 { 300 } else { 600 } {
-        return Err("本次核验已过期，请重新发起".into());
+        return Err(crate::error::ApiError::invalid(
+            "本次核验已过期，请重新发起",
+        ));
     }
     let r = network::call(
         d,
@@ -185,9 +198,9 @@ pub async fn alipay_check(
     Ok(check(&app, &d, position).await?)
 }
 #[tauri::command]
-pub async fn alipay_opened(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn alipay_opened(app: tauri::AppHandle) -> Result<(), crate::error::ApiError> {
     let d = network::snapshot(&app.state::<Store>())?;
-    let uid = text(&d.account, "uid");
+    let uid = d.account.uid.clone();
     let time = app
         .state::<Tickets>()
         .0
@@ -199,15 +212,15 @@ pub async fn alipay_opened(app: tauri::AppHandle) -> Result<(), String> {
     notify(&d, 2, time).await
 }
 #[tauri::command]
-pub fn alipay_launch(url: String, app: tauri::AppHandle) -> Result<(), String> {
+pub fn alipay_launch(url: String, app: tauri::AppHandle) -> Result<(), crate::error::ApiError> {
     let d = network::snapshot(&app.state::<Store>())?;
-    let uid = text(&d.account, "uid");
+    let uid = d.account.uid.clone();
     let expected = app
         .state::<Tickets>()
         .1
         .lock()
         .map_err(|_| "拉起状态不可用")?
-        .get(&format!("{}:{}", uid, text(&d.account, "token")))
+        .get(&format!("{}:{}", uid, d.account.token.clone()))
         .cloned()
         .ok_or("请先生成本次二维码")?;
     if expected != url {
@@ -252,13 +265,13 @@ mod tests {
     #[test]
     fn encrypted_payload_has_stage_and_no_plain_token() {
         let mut d = Data::default();
-        d.account = json!({"uid":"42","token":"secret"});
+        d.account = serde_json::from_value(json!({"uid":"42","token":"secret"})).unwrap();
         d.school_id = "297".into();
         let u = uri(&d, 2, 123).unwrap();
         assert!(u.starts_with("alipays://platformapi/startapp?appId=2021006131634466"));
         assert!(!u.contains("secret"));
         let v: Value = serde_json::from_str(include_str!("alipay-vector.json")).unwrap();
-        d.account["token"] = json!("test-token");
+        d.account.token = "test-token".to_string();
         assert_eq!(uri(&d, 2, 123).unwrap(), v["expected"]);
     }
 }

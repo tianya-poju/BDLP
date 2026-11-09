@@ -1,7 +1,11 @@
 use std::{env, fs, path::PathBuf};
 fn main() {
-    let path =
-        PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../map-secrets.local.json");
+    println!("cargo:rerun-if-env-changed=BUD_MAP_CONFIG_PATH");
+    let path = env::var_os("BUD_MAP_CONFIG_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../map-secrets.local.json")
+        });
     println!("cargo:rerun-if-changed={}", path.display());
     println!("cargo:rerun-if-env-changed=BUD_TEST_MAP_CONFIG");
     let v: serde_json::Value = fs::read_to_string(&path)

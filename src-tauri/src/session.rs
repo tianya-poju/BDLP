@@ -1,52 +1,21 @@
+pub use crate::error::ApiError;
 use crate::{network, store::Store};
-use serde::Serialize;
 use serde_json::{json, Value};
-#[derive(Debug, Serialize, Clone)]
-pub struct ApiError {
-    pub kind: String,
-    pub message: String,
-    pub code: Option<String>,
+pub fn auth_error(error: &ApiError) -> bool {
+    error.kind == crate::error::ErrorKind::AuthExpired
 }
-impl From<String> for ApiError {
-    fn from(s: String) -> Self {
-        if let Ok(v) = serde_json::from_str::<Value>(&s) {
-            if v["kind"].is_string() {
-                return Self {
-                    kind: network::text(&v, "kind"),
-                    message: network::text(&v, "message"),
-                    code: v["code"].as_str().map(str::to_string),
-                };
-            }
-        }
-        Self {
-            kind: if s.contains("超时") || s.contains("连接") || s.contains("网络") {
-                "network"
-            } else {
-                "business"
-            }
-            .into(),
-            message: s,
-            code: None,
-        }
-    }
-}
-impl From<&str> for ApiError {
-    fn from(s: &str) -> Self {
-        s.to_string().into()
-    }
-}
-pub fn auth_error(message: &str) -> bool {
-    ApiError::from(message.to_string()).kind == "auth_expired"
-}
-pub fn invalidate(store: &Store, expected: &crate::store::Data) -> Result<(), String> {
+pub fn invalidate(
+    store: &Store,
+    expected: &crate::store::Data,
+) -> Result<(), crate::error::ApiError> {
     store.update(|d| {
-        let uid = network::text(&expected.account, "uid");
+        let uid = expected.account.uid.clone();
         if network::same_account(d, expected) {
-            d.account["token"] = json!("");
+            d.account.token = "".to_string();
         }
         if let Some(p) = d.profiles.get_mut(&uid) {
-            if p.account["token"] == expected.account["token"] {
-                p.account["token"] = json!("");
+            if p.account.token == expected.account.token {
+                p.account.token = "".to_string();
             }
         }
     })
@@ -54,7 +23,7 @@ pub fn invalidate(store: &Store, expected: &crate::store::Data) -> Result<(), St
 #[tauri::command]
 pub async fn session_check(store: tauri::State<'_, Store>) -> Result<Value, ApiError> {
     let d = network::snapshot(&store)?;
-    if network::text(&d.account, "token").is_empty() {
+    if d.account.token.clone().is_empty() {
         return Ok(json!({"status":1,"loggedIn":false,"message":"当前账号未登录"}));
     }
     match network::call(&d, "User/User", Default::default(), None).await {
@@ -74,21 +43,22 @@ mod tests {
     use super::*;
     #[test]
     fn network_error_is_not_logout() {
-        assert!(!auth_error("请求超时"));
-        assert!(auth_error(
-            r#"{"kind":"auth_expired","message":"过期","code":"102"}"#
-        ));
+        assert!(!auth_error(&ApiError::network("请求超时")));
+        assert!(auth_error(&ApiError::new(
+            crate::error::ErrorKind::AuthExpired,
+            "expired"
+        )));
     }
     #[test]
     fn stale_token_does_not_clear_new_login() {
         let root = std::env::temp_dir().join(format!("session-{}", uuid::Uuid::new_v4()));
         let s = Store::open(root.join("settings.dpapi")).unwrap();
-        s.update(|d| d.account = json!({"uid":"A","token":"old"}))
+        s.update(|d| d.account = serde_json::from_value(json!({"uid":"A","token":"old"})).unwrap())
             .unwrap();
         let old = network::snapshot(&s).unwrap();
-        s.update(|d| d.account["token"] = json!("new")).unwrap();
+        s.update(|d| d.account.token = "new".into()).unwrap();
         invalidate(&s, &old).unwrap();
-        assert_eq!(network::snapshot(&s).unwrap().account["token"], "new");
+        assert_eq!(network::snapshot(&s).unwrap().account.token, "new");
         std::fs::remove_file(root.join("settings.dpapi")).unwrap();
         std::fs::remove_dir(root).unwrap();
     }
