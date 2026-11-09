@@ -1,0 +1,174 @@
+{
+  "fixtures": [
+    {
+      "endpoint": "Run/stopRunV278",
+      "params": {
+        "version": "232",
+        "version_name": "4.3.2",
+        "mobileModel": "TEST",
+        "mobileDeviceId": "test-device",
+        "mobileOsVersion": "16",
+        "ostype": "1",
+        "school_id": "297",
+        "uid": "2468",
+        "token": "test-token",
+        "timestamp": "1700000000",
+        "nonce": "234567",
+        "distance": "2.00"
+      },
+      "expected": {
+        "distance": "2.00",
+        "mobileDeviceId": "test-device",
+        "mobileModel": "TEST",
+        "mobileOsVersion": "16",
+        "nonce": "234567",
+        "ostype": "1",
+        "school_id": "297",
+        "sign": "cbea29e90ba1d35a9b7dd50973b4cd08",
+        "timestamp": "1700000000",
+        "token": "test-token",
+        "uid": "2468",
+        "version": "232",
+        "version_name": "4.3.2"
+      }
+    },
+    {
+      "endpoint": "Run2/gyroscope",
+      "params": {
+        "version": "232",
+        "version_name": "4.3.2",
+        "mobileModel": "TEST",
+        "mobileDeviceId": "test-device",
+        "mobileOsVersion": "16",
+        "ostype": "1",
+        "school_id": "297",
+        "uid": "2468",
+        "token": "test-token",
+        "timestamp": "1700000000",
+        "nonce": "234567",
+        "distance": "2.00"
+      },
+      "expected": {
+        "distance": "2.00",
+        "mobileDeviceId": "test-device",
+        "mobileModel": "TEST",
+        "mobileOsVersion": "16",
+        "nonce": "234567",
+        "ostype": "1",
+        "school_id": "297",
+        "sign": "cbea29e90ba1d35a9b7dd50973b4cd08",
+        "timestamp": "1700000000",
+        "token": "test-token",
+        "uid": "2468",
+        "version": "232",
+        "version_name": "4.3.2"
+      }
+    },
+    {
+      "endpoint": "Run/setRunLocationRecord",
+      "params": {
+        "version": "232",
+        "version_name": "4.3.2",
+        "mobileModel": "TEST",
+        "mobileDeviceId": "test-device",
+        "mobileOsVersion": "16",
+        "ostype": "1",
+        "school_id": "297",
+        "uid": "2468",
+        "token": "test-token",
+        "timestamp": "1700000000",
+        "nonce": "234567",
+        "distance": "2.00"
+      },
+      "expected": {
+        "distance": "2.00",
+        "mobileDeviceId": "test-device",
+        "mobileModel": "TEST",
+        "mobileOsVersion": "16",
+        "nonce": "234567",
+        "ostype": "1",
+        "school_id": "297",
+        "sign": "cbea29e90ba1d35a9b7dd50973b4cd08",
+        "timestamp": "1700000000",
+        "token": "test-token",
+        "uid": "2468",
+        "version": "232",
+        "version_name": "4.3.2"
+      }
+    },
+    {
+      "endpoint": "Run/stopFreeRunV220",
+      "params": {
+        "version": "232",
+        "version_name": "4.3.2",
+        "mobileModel": "TEST",
+        "mobileDeviceId": "test-device",
+        "mobileOsVersion": "16",
+        "ostype": "1",
+        "school_id": "297",
+        "uid": "2468",
+        "token": "test-token",
+        "timestamp": "1700000000",
+        "nonce": "234567",
+        "distance": "2.00"
+      },
+      "expected": {
+        "key": "w4cQ9hJh734FDkwwWuBEUUWS0nSRP/PpDWGZsQrSVKYazNOtSF2BHjIYL+94X+K2HtVlQwzEYJlhLvyg8CJcN1DiO0VHMkLR+SjQrdrj/IAkNCJ85gsYDwD2AaaWXMpVnDXKYMI+/pES4njXtyHNG6tT0q4arXcWOIMKT93j7akLAN5deH9qg8ivi8jJmpp15VTkwTZpnvQ/rF1zV2QiM0n+0WWFaZ2zcRxXAXIFNFh7/u5QMB32j+vmNbLfCWnJXNhCf62FqQbMUN40pjc2V1b3kdELStQpnxiIFKP+ewp7TpDlurHoV3gbYJBwBXd7ccFOrtsWeHNnNysw0pkLcHWp+KLmfGJjdtKPv1rcGSuG1mUKUu0ZMGN7bb2UCwwU"
+      }
+    },
+    {
+      "endpoint": "Run2/beforeRunV260",
+      "params": {
+        "version": "232",
+        "version_name": "4.3.2",
+        "mobileModel": "TEST",
+        "mobileDeviceId": "test-device",
+        "mobileOsVersion": "16",
+        "ostype": "1",
+        "school_id": "297",
+        "uid": "2468",
+        "token": "test-token",
+        "timestamp": "1700000000",
+        "nonce": "234567",
+        "distance": "2.00"
+      },
+      "expected": {
+        "key": "yT0P028vXKFZJcqo+/krtb0m2azJMi4ka3Kh2c3Cbj3zZbqu1O3iY8ZqjYuw7+YD3ofsPWFW443LxsinGS1DyF+L5oVWh0hxnTqmXWQC2EuRf5RH0BPmL23WtYQcCxFAVYqa59k+37wiu0yxhXDBKtxBohb1rKezBBDJgZ7SBo8EKcSjWegvXo1+joxQrfaodISD58sqFrsAq0rqi0XRNFOI0k3xsEhl2/ptTHuBNKDQAJcDBxGrlNHdiYMaVn5NgpMTLMI7tsQUeKXe1Pm+T9V0+Xldg0MzHBcUcWeK+YD5wv0ZTeZodh7ettOLjeskTelOJCG742xd5opWEXWyT25p9WUsGrMJ42edQrkB44UjgKgKjw3u5xU1Yhy4wSuG"
+      }
+    },
+    {
+      "endpoint": "report/getOssSts",
+      "params": {
+        "version": "232",
+        "version_name": "4.3.2",
+        "mobileModel": "TEST",
+        "mobileDeviceId": "test-device",
+        "mobileOsVersion": "16",
+        "ostype": "1",
+        "school_id": "297",
+        "uid": "2468",
+        "token": "test-token",
+        "timestamp": "1700000000",
+        "nonce": "234567",
+        "distance": "2.00"
+      },
+      "expected": {
+        "key": "yT0P028vXKFZJcqo+/krtb0m2azJMi4ka3Kh2c3Cbj3zZbqu1O3iY8ZqjYuw7+YD3ofsPWFW443LxsinGS1DyF+L5oVWh0hxnTqmXWQC2EuRf5RH0BPmL23WtYQcCxFAVYqa59k+37wiu0yxhXDBKtxBohb1rKezBBDJgZ7SBo8EKcSjWegvXo1+joxQrfaodISD58sqFrsAq0rqi0XRNFOI0k3xsEhl2/ptTHuBNKDQAJcDBxGrlNHdiYMaVn5NgpMTLMI7tsQUeKXe1Pm+T9V0+Xldg0MzHBcUcWeK+YD5wv0ZTeZodh7ettOLjeskTelOJCG742xd5opWEXWyT25p9WUsGrMJ42edQrkB44UjgKgKjw3u5xU1Yhy4wSuG"
+      }
+    }
+  ],
+  "recordStrings": [
+    {
+      "uid": 2468,
+      "school": 297,
+      "time": "mock-time",
+      "expected": "93dbf55733458e1ae318522ce397decf"
+    },
+    {
+      "uid": 2147483647,
+      "school": 297,
+      "time": "wrapped",
+      "expected": "80c983bd017945fc41238c62f31d070d"
+    }
+  ]
+}
