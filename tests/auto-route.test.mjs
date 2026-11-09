@@ -4,13 +4,46 @@ globalThis.__routeTest={
  h:(tag,attrs={},children=[])=>({tag,...attrs,children,disabled:!!attrs.disabled,append(...items){this.children.push(...items)}}),
  openModal:options=>{fixture.options=options;return {close:()=>options.onClose()}},
  calculatePreview:async()=>({canApply:true,passed:2,total:2,samples:100,outsideCount:0}),Geo:{polyline:()=>({addTo(){}}),marker:()=>({addTo(){return{bindTooltip(){}}}})},toast:()=>{},invoke:(cmd,args)=>fixture.invoke(cmd,args),
- createBaseMap:()=>({remove(){fixture.removed=true}}),drawFence:()=>{},drawPath:()=>{},pointIcon:()=>{}
+ createBaseMap:()=>{if(fixture.mapError)throw Error('地图初始化失败');return{remove(){fixture.removed=true}}},drawFence:()=>{},drawPath:()=>{},pointIcon:()=>{}
 };
 globalThis.L={polyline:()=>({addTo(){}}),marker:()=>({addTo(){return {bindTooltip(){}}}})};
 const source=fs.readFileSync(new URL('../frontend/js/auto-route.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'');
 const {autoRoute}=await import('data:text/javascript,'+encodeURIComponent('const {h,openModal,toast,invoke,createBaseMap,drawFence,drawPath,pointIcon,Geo,calculatePreview}=globalThis.__routeTest;\n'+source));
 const result={points:[[0,0],[0,1],[0,0]],fence:[],outsideSegments:[],order:[{id:'a',point:[0,0]},{id:'b',point:[0,1]}],distanceM:2000,exact:true,covered:2,canApply:true,fenceAvailable:false,minimumM:0};
 const tick=()=>new Promise(r=>setImmediate(r));
+
+test('polling never overlaps and late status cannot overwrite success or failure',async()=>{
+ const realSet=globalThis.setInterval,realClear=globalThis.clearInterval;
+ try{
+  for(const failure of [false,true]){
+   let poll,finish,rejectPlan,finishStatus,statusCalls=0,cleared=0;
+   globalThis.setInterval=fn=>{poll=fn;return 99;};
+   globalThis.clearInterval=id=>{if(id===99)cleared++;};
+   fixture={invoke:(cmd)=>{
+    if(cmd==='route_plan')return new Promise((resolve,reject)=>{finish=resolve;rejectPlan=reject;});
+    if(cmd==='route_plan_status'){statusCalls++;return new Promise(resolve=>finishStatus=resolve);}
+    return Promise.resolve();
+   }};
+   const modal=autoRoute({});await tick();const pending=poll();await poll();assert.equal(statusCalls,1);
+   if(failure)rejectPlan(Error('规划失败'));else finish(result);await tick();
+   const final=fixture.options.body[1].textContent;assert.match(final,failure?/规划失败/:/已覆盖/);assert.equal(cleared,1);
+   finishStatus({phase:'迟到',completed:0,total:10});await pending;await tick();assert.equal(fixture.options.body[1].textContent,final);
+   await poll();assert.equal(statusCalls,1);modal.close();
+  }
+ }finally{globalThis.setInterval=realSet;globalThis.clearInterval=realClear;}
+});
+test('closing an outstanding status request discards its result and map creation errors are handled',async()=>{
+ const realSet=globalThis.setInterval,realClear=globalThis.clearInterval;
+ try{
+  let poll,finishPlan,finishStatus,cleared=0;
+  globalThis.setInterval=fn=>{poll=fn;return 77;};globalThis.clearInterval=id=>{if(id===77)cleared++;};
+  fixture={invoke:cmd=>cmd==='route_plan'?new Promise(r=>finishPlan=r):cmd==='route_plan_status'?new Promise(r=>finishStatus=r):Promise.resolve()};
+  const modal=autoRoute({});await tick();const pending=poll();modal.close();const before=fixture.options.body[1].textContent;
+  finishStatus({phase:'late'});finishPlan(result);await pending;await tick();assert.equal(fixture.options.body[1].textContent,before);assert.equal(cleared,1);
+  fixture={mapError:true,invoke:cmd=>{if(cmd==='route_plan_cancel')return Promise.resolve();throw Error('Unexpected request')}};
+  const failed=autoRoute({});await tick();assert.match(fixture.options.body[1].textContent,/地图初始化失败/);failed.close();
+ }finally{globalThis.setInterval=realSet;globalThis.clearInterval=realClear;}
+});
 test('closing preview cancels native candidate and discards late response',async()=>{
  let finish;const calls=[];fixture={invoke:(cmd,args)=>{calls.push(cmd);if(cmd==='route_plan')return new Promise(r=>finish=r);return Promise.resolve()}};
  const modal=autoRoute({});await tick();modal.close();finish(result);await tick();
