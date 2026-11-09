@@ -1,7 +1,7 @@
 {
   "name": "budao-lepao-build",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.1.1",
   "scripts": {
     "build:frontend": "node tools/build-frontend.cjs",
     "test": "node tools/build-frontend.cjs && node --test tests/*.test.mjs",
