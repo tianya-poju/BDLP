@@ -33,11 +33,7 @@ fn download_url(file: &str) -> Result<url::Url, crate::error::ApiError> {
 }
 fn decode(raw: &str) -> Result<Vec<Value>, crate::error::ApiError> {
     let c = cfg();
-    let plain = decrypt(
-        raw,
-        c["KEY_TRK"].as_str().unwrap(),
-        c["IV_TRK"].as_str().unwrap(),
-    )?;
+    let plain = decrypt(raw, &c.key_trk, &c.iv_trk)?;
     let values: Vec<Value> = serde_json::from_str(&plain).map_err(|_| "轨迹文件格式无效")?;
     if values.len() > 100000 {
         return Err("轨迹点过多".into());
