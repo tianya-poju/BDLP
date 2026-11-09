@@ -1,7 +1,9 @@
+import { logins } from "../login-client.js";
 import { h, toast, confirmDialog } from "../util.js";
 import { api } from "../api.js";
 import { devicePresetSelect } from "../components.js";
 export function LoginView(app) {
+  const owner = Symbol("login-view");
   let destroyed = false,
     wxSid = null,
     pollTimer = null,
@@ -21,12 +23,15 @@ export function LoginView(app) {
   });
   const wxNote = h("p", { class: "hint", text: "点击下方按钮获取二维码" });
   async function cancelWx() {
-    requestSeq++;
+    const seq = ++requestSeq;
+    const cancelling = logins.cancel(owner);
     if (pollTimer) clearTimeout(pollTimer);
     pollTimer = null;
     const sid = wxSid;
     wxSid = null;
     if (sid) await api.wechatLoginCancel(sid).catch(() => {});
+    await cancelling;
+    return seq;
   }
   async function poll(sid) {
     if (destroyed || sid !== wxSid) return;
@@ -55,12 +60,12 @@ export function LoginView(app) {
     text: "获取微信二维码",
     onClick: async () => {
       wxButton.disabled = true;
-      await cancelWx();
-      const seq = requestSeq;
+      const seq = await cancelWx();
+      if (destroyed || seq !== requestSeq) return;
       wxImage.style.display = "none";
       wxNote.textContent = "正在获取二维码…";
       try {
-        const r = await api.wechatLoginStart();
+        const r = await logins.start("wechat", owner);
         if (destroyed || seq !== requestSeq) {
           await api.wechatLoginCancel(r.sid);
           return;
@@ -73,8 +78,10 @@ export function LoginView(app) {
       } catch (e) {
         if (!destroyed) wxNote.textContent = String(e);
       } finally {
-        wxButton.disabled = false;
-        wxButton.textContent = "重新获取二维码";
+        if (!destroyed) {
+          wxButton.disabled = false;
+          wxButton.textContent = "重新获取二维码";
+        }
       }
     },
   });
@@ -90,6 +97,7 @@ export function LoginView(app) {
         text: "取消扫码",
         onClick: async () => {
           await cancelWx();
+          if (destroyed) return;
           wxImage.style.display = "none";
           wxNote.textContent = "已取消扫码";
         },
@@ -106,15 +114,18 @@ export function LoginView(app) {
         onClick: async (e) => {
           const btn = e.currentTarget;
           btn.disabled = true;
-          await cancelWx();
+          const seq = await cancelWx();
+          if (destroyed || seq !== requestSeq) return;
           wxImage.style.display = "none";
           try {
-            await api.qqLoginStart();
+            await logins.start("qq", owner);
+            if (destroyed || seq !== requestSeq) return;
             message.textContent = "请在 QQ 授权窗口扫码，完成后自动返回。";
           } catch (error) {
+            if (destroyed) return;
             message.textContent = String(error);
           } finally {
-            btn.disabled = false;
+            if (!destroyed) btn.disabled = false;
           }
         },
       }),
@@ -135,6 +146,7 @@ export function LoginView(app) {
   return {
     el: root,
     destroy() {
+      if (destroyed) return;
       destroyed = true;
       cancelWx();
     },
