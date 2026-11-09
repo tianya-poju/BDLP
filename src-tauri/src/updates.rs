@@ -296,9 +296,9 @@ mod tests {
                 .await
                 .unwrap()
         });
-        assert_eq!(parse(&bytes, "1.1.0").unwrap().status, "available");
+        assert_eq!(parse(&bytes, "1.1.1").unwrap().status, "available");
         println!(
-            "Published release confirmed: {}; 1.1.0 detects available update",
+            "Published release confirmed: {}; 1.1.1 detects available update",
             env!("CARGO_PKG_VERSION")
         );
     }
