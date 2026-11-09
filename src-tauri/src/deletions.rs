@@ -202,6 +202,23 @@ mod tests {
         assert!(s.data.lock().unwrap().account.uid.is_empty());
         fs::remove_dir_all(root).unwrap();
     }
+    #[test]
+    fn deletion_removes_only_selected_accounts_receipt_archive() {
+        let (root, s, _) = fixture();
+        s.update(|d| {
+            d.receipt_history
+                .insert("a".into(), vec![crate::receipts::Receipt::default()]);
+            d.receipt_history
+                .insert("b".into(), vec![crate::receipts::Receipt::default()]);
+        })
+        .unwrap();
+        remove(&s, "b").unwrap();
+        assert!(!s.data.lock().unwrap().receipt_history.contains_key("b"));
+        assert!(s.data.lock().unwrap().receipt_history.contains_key("a"));
+        remove(&s, "a").unwrap();
+        assert!(s.data.lock().unwrap().receipt_history.is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 pub(crate) fn remove(store: &Store, uid: &str) -> Result<bool, crate::error::ApiError> {
     let _files = store
@@ -237,6 +254,7 @@ pub(crate) fn remove(store: &Store, uid: &str) -> Result<bool, crate::error::Api
         } else {
             d.profiles.remove(uid);
             d.run_receipts.remove(uid);
+            d.receipt_history.remove(uid);
         }
         d.pending_deletions.insert(j.id.clone());
         Ok(())
