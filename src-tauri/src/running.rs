@@ -90,7 +90,9 @@ pub fn run_current(
         .rev()
         .find(|j| j.data.account.uid.clone() == uid)
         .map(|j| json!({"id":j.id,"mode":j.mode}));
-    Ok(json!({"current":current,"latest":latest,"pending":false,"receipt":receipt(&d)}))
+    Ok(
+        json!({"uid":uid,"current":current,"latest":latest,"pending":false,"receipt":receipt(&d),"receiptHistory":d.receipt_history.get(&uid).cloned().unwrap_or_default()}),
+    )
 }
 #[tauri::command]
 pub fn run_resolve(
@@ -120,10 +122,12 @@ pub fn run_open(
     uid: String,
     store: tauri::State<Store>,
     runs: tauri::State<Runs>,
+    app: tauri::AppHandle,
 ) -> Result<Value, crate::error::ApiError> {
     if !["free", "campus"].contains(&mode.as_str()) {
         return Err("跑步类型无效".into());
     }
+    let mut jobs = runs.0.lock().map_err(|_| "任务不可用")?;
     let mut d = snapshot(&store)?;
     if uid != d.account.uid.clone() || d.account.token.clone().is_empty() {
         return Err("账号已变化，请刷新后重试".into());
@@ -139,7 +143,6 @@ pub fn run_open(
     if mode == "campus" && d.zone.id.clone().is_empty() {
         return Err("请先选择跑区".into());
     }
-    let mut jobs = runs.0.lock().map_err(|_| "任务不可用")?;
     if jobs.iter().any(|j| j.blocking()) {
         return Err("已有跑步任务，请等待结束或取消".into());
     }
@@ -158,6 +161,8 @@ pub fn run_open(
     while jobs.len() > 8 {
         jobs.pop_front();
     }
+    drop(jobs);
+    let _ = app.emit_to("main", "job-updated", &reply["jobId"]);
     Ok(reply)
 }
 #[tauri::command]
@@ -209,6 +214,9 @@ pub async fn face_validate(app: tauri::AppHandle) -> Result<Value, crate::error:
     });
     {
         let mut jobs = runs.0.lock().map_err(|_| "任务不可用")?;
+        if !same(&job.data, &*store.data.lock()?) {
+            return Err("账号环境已改变，请重试".into());
+        }
         if jobs.iter().any(|j| j.blocking()) {
             return Err("已有任务正在运行".into());
         }
