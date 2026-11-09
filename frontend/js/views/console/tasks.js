@@ -1,9 +1,16 @@
 import { h, svg, toast, fmtKm, pref } from "../../util.js";
-import { api, subscribeJob } from "../../api.js";
+import { api, subscribeJob, subscribeJobs } from "../../api.js";
 
 export function createTasks({ app, uploadCard, logPanel, goAlipay }) {
   let runJob = app.state.running?.current?.id || null;
   let unsubscribe = null;
+  let stopRegistry = null,
+    watchedId = null;
+  let destroyed = false,
+    starting = false,
+    watchSeq = 0;
+  const ownerUid = app.state.activeUid;
+  const alive = () => !destroyed && app.state.activeUid === ownerUid;
   let mode = pref.get("runMode", "free");
   function renderUpload() {
     if (globalThis.LEPAO_TRIAL) return;
@@ -69,18 +76,20 @@ export function createTasks({ app, uploadCard, logPanel, goAlipay }) {
             "button",
             {
               class: "btn btn-primary btn-lg btn-block",
-              disabled: Boolean(runJob) || r.points.length < 2,
+              disabled: starting || Boolean(runJob) || r.points.length < 2,
               title: "主动启动后将向乐跑服务提交记录",
               onClick: () => startRun(),
             },
             [
               svg("play", 16),
               h("span", {
-                text: runJob
-                  ? "执行中…"
-                  : mode === "campus"
-                    ? "上传校园跑"
-                    : "上传自由跑",
+                text: starting
+                  ? "准备中…"
+                  : runJob
+                    ? "执行中…"
+                    : mode === "campus"
+                      ? "上传校园跑"
+                      : "上传自由跑",
               }),
             ],
           ),
@@ -101,12 +110,21 @@ export function createTasks({ app, uploadCard, logPanel, goAlipay }) {
   }
 
   function watchRun(id, notify = true) {
+    watchedId = id;
     unsubscribe?.();
+    const seq = ++watchSeq;
+    const live = () => alive() && watchSeq === seq;
+    if (!live()) return;
     unsubscribe = subscribeJob(id, {
-      onLog: (e) => logPanel.append(e.msg),
-      onFaceRequest: (ticket) =>
-        goAlipay({ position: ticket.position, ticket }),
+      onLog: (e) => {
+        if (live()) logPanel.append(e.msg);
+      },
+      onFaceRequest: (ticket) => {
+        if (live()) goAlipay({ position: ticket.position, ticket });
+      },
       onDone: async (d) => {
+        if (!live()) return;
+        const completionSeq = ++watchSeq;
         runJob = null;
         const result = d.result || {};
         const message =
@@ -127,25 +145,31 @@ export function createTasks({ app, uploadCard, logPanel, goAlipay }) {
         unsubscribe?.();
         unsubscribe = null;
         await app.refresh();
-        renderUpload();
+        if (alive() && watchSeq === completionSeq) renderUpload();
       },
     });
   }
   async function startRun() {
-    if (runJob) return;
+    if (!alive() || runJob || starting) return;
+    starting = true;
+    renderUpload();
     try {
       if (logPanel.count === 0) logPanel.clear();
       const res = await api.runStart({ mode });
+      if (!alive()) return;
       runJob = res.jobId;
       app.state.running = {
         ...app.state.running,
         current: { id: runJob, mode },
         latest: { id: runJob, mode },
       };
-      watchRun(runJob);
+      if (watchedId !== runJob || !unsubscribe) watchRun(runJob);
       renderUpload();
     } catch (e) {
-      toast(e.message || String(e), "danger");
+      if (alive()) toast(e.message || String(e), "danger");
+    } finally {
+      starting = false;
+      if (alive()) renderUpload();
     }
   }
 
@@ -155,7 +179,30 @@ export function createTasks({ app, uploadCard, logPanel, goAlipay }) {
       if (runJob) watchRun(runJob);
       else if (app.state.running?.latest?.id)
         watchRun(app.state.running.latest.id, false);
+      stopRegistry?.();
+      stopRegistry = subscribeJobs((state) => {
+        if (!alive() || state.uid !== ownerUid) return;
+        app.state.running = state;
+        if (state.current && state.current.id !== runJob) {
+          runJob = state.current.id;
+          watchRun(runJob);
+          renderUpload();
+        } else if (
+          !runJob &&
+          state.latest?.id &&
+          state.latest.id !== watchedId
+        ) {
+          watchRun(state.latest.id, false);
+        }
+      });
     },
-    destroy: () => unsubscribe?.(),
+    destroy: () => {
+      destroyed = true;
+      watchSeq++;
+      unsubscribe?.();
+      unsubscribe = null;
+      stopRegistry?.();
+      stopRegistry = null;
+    },
   };
 }
