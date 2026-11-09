@@ -10,6 +10,7 @@ mod faces;
 mod history;
 mod ipc_policy;
 mod lifecycle;
+mod login;
 mod map_config;
 mod models;
 mod native_runner;
@@ -70,6 +71,7 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             lifecycle::show(app)
         }))
+        .manage(login::Attempts::default())
         .manage(updates::Checks::default())
         .manage(planner::Plans::default())
         .manage(face_window::Registration::default())
@@ -97,6 +99,8 @@ fn main() {
                 return true;
             }
             let handler: fn(tauri::ipc::Invoke) -> bool = tauri::generate_handler![
+                login::login_begin,
+                login::login_cancel,
                 updates::update_check,
                 updates::update_open,
                 planner::route_plan,
