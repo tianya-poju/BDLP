@@ -1,5 +1,11 @@
+#[allow(dead_code)]
+#[path = "src/protocol_config.rs"]
+mod protocol_config;
 use std::{env, fs, path::PathBuf};
 fn main() {
+    println!("cargo:rerun-if-changed=src/protocol-config.json");
+    println!("cargo:rerun-if-changed=src/protocol_config.rs");
+    protocol_config::parse(include_str!("src/protocol-config.json")).expect("协议构建配置校验失败");
     println!("cargo:rerun-if-env-changed=BUD_MAP_CONFIG_PATH");
     let path = env::var_os("BUD_MAP_CONFIG_PATH")
         .map(PathBuf::from)
