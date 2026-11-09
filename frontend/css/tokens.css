@@ -1,0 +1,123 @@
+/* ============================================================
+   设计令牌 —— Lepao Web 版 · iOS 浅色风格
+   取值对齐 Apple HIG 系统色（Light）：
+   分组背景 = systemGroupedBackground，卡片 = secondarySystemGroupedBackground，
+   强调色 = systemBlue，语义色 = systemGreen / systemOrange / systemRed
+   变量名保持与旧版一致（app.css 与 JS 无需改动引用）
+   ============================================================ */
+
+:root {
+  /* ── 背景层级（iOS Light） ── */
+  --bg:            #F2F2F7;   /* systemGroupedBackground —— 页面底 */
+  --bg-elev:       #FFFFFF;   /* 抬升面（导航栏/输入区） */
+  --panel:         #FFFFFF;   /* 卡片 = secondarySystemGroupedBackground */
+  --panel-2:       #F2F2F7;   /* 卡内嵌块 = tertiarySystemGroupedBackground */
+  --panel-3:       #E5E5EA;   /* 按压态 = systemGray5 */
+  --line:          rgba(60, 60, 67, 0.14);   /* 细分隔线（卡片内） */
+  --line-strong:   rgba(60, 60, 67, 0.29);   /* 不透明分隔 / 控件描边 */
+
+  /* ── 文字层级（label 四档） ── */
+  --text:          #000000;                   /* label */
+  --text-dim:      rgba(60, 60, 67, 0.60);    /* secondaryLabel */
+  --text-mute:     rgba(60, 60, 67, 0.42);    /* tertiaryLabel（已抬高以保证可读） */
+
+  /* ── 强调色 systemBlue ── */
+  --accent:        #007AFF;
+  --accent-hover:  #0071E3;
+  --accent-soft:   rgba(0, 122, 255, 0.12);
+  --on-accent:     #FFFFFF;
+
+  /* ── 语义色（系统色，用于填充/标记/图表） ── */
+  --ok:            #34C759;   /* systemGreen */
+  --ok-soft:       rgba(52, 199, 89, 0.14);
+  --warn:          #FF9500;   /* systemOrange */
+  --warn-soft:     rgba(255, 149, 0, 0.14);
+  --danger:        #FF3B30;   /* systemRed */
+  --danger-soft:   rgba(255, 59, 48, 0.12);
+  --gray:          #8E8E93;   /* systemGray */
+
+  /* ── 文本用语义色（Apple 无障碍深色变体，白底对比度 ≥ 4.5:1） ──
+     系统色在白底上的对比度不足（绿 1.99:1、蓝 3.6:1、红 3.55:1），
+     因此「有色文字」一律用这一组，填充/标记仍用上面的系统色。 */
+  --accent-text:   #0040DD;   /* accessible blue */
+  --ok-text:       #248A3D;   /* accessible green */
+  --warn-text:     #C93400;   /* accessible orange */
+  --danger-text:   #D70015;   /* accessible red */
+
+  /* ── 地图/数据 ── */
+  --track:         #007AFF;
+  --track-casing:  #FFFFFF;
+  --fence:         #FF9500;
+  --fence-soft:    rgba(255, 149, 0, 0.15);
+
+  /* ── 传感器三轴配色 / 图表网格（图表与图例共用，避免两处硬编码） ── */
+  --axis-x:        #FF3B30;                   /* ax */
+  --axis-y:        #34C759;                   /* ay */
+  --axis-z:        #007AFF;                   /* az */
+  --axis-grid:     rgba(60, 60, 67, 0.10);    /* 图表参考线/网格 */
+
+  /* ── 材质与模糊（导航栏/标签栏/开关用） ── */
+  --material-bar:  rgba(249, 249, 249, 0.80);
+  --material-card: rgba(255, 255, 255, 0.72);
+  --blur:          20px;
+  --blur-strong:   30px;
+
+  /* ── 字形：SF Pro / 系统中文，数据用等宽 ── */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+                "PingFang SC", "HarmonyOS Sans SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* iOS Dynamic Type（换算到 CSS px，略收紧以适配数据密度） */
+  --fs-xs: 11px;    /* caption2 */
+  --fs-sm: 13px;    /* footnote  */
+  --fs-base: 15px;  /* subheadline */
+  --fs-md: 16px;    /* body 略紧 */
+  --fs-lg: 17px;    /* headline */
+  --fs-xl: 22px;    /* title2 */
+  --fs-2xl: 28px;   /* title1 */
+  --fs-3xl: 34px;   /* largeTitle */
+
+  /* ── 空间：8pt 栅格 ── */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* ── 圆角（iOS 连续圆角近似） ── */
+  --r-sm: 8px;
+  --r-md: 10px;   /* 控件 */
+  --r-lg: 12px;   /* 卡片 / 分组列表 */
+  --r-xl: 22px;   /* 弹层顶部 */
+
+  /* ── 阴影：极轻，iOS 靠材质与描边分层 ── */
+  --shadow-card: 0 0 0 0.5px rgba(0, 0, 0, 0.03), 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-thumb: 0 3px 8px rgba(0, 0, 0, 0.12), 0 1px 1px rgba(0, 0, 0, 0.04);
+  --shadow-raised: 0 0 0 0.5px rgba(0, 0, 0, 0.04), 0 2px 8px rgba(0, 0, 0, 0.07);
+  --shadow-sheet: 0 -1px 0 rgba(0, 0, 0, 0.04), 0 -18px 48px rgba(0, 0, 0, 0.18);
+  --shadow-pop: 0 8px 30px rgba(0, 0, 0, 0.16);
+
+  /* ── 层级 ── */
+  --z-nav: 40;
+  --z-overlay: 60;
+  --z-modal: 80;
+  --z-toast: 100;
+
+  /* ── 动效：iOS 弹簧手感（用易出线近似） ── */
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --t-fast: 140ms;
+  --t-base: 240ms;
+
+  /* ── 布局 ── */
+  --header-h: 54px;   /* 导航栏 44pt + 余量 */
+  --tabbar-h: 58px;   /* 标签栏 49pt + 安全区 */
+  --rail-w: 240px;
+  --content-max: 820px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
