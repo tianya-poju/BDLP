@@ -11,6 +11,7 @@ mod snapshot_tests;
 #[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Data {
+    pub receipt_history: std::collections::BTreeMap<String, Vec<crate::receipts::Receipt>>,
     #[serde(flatten)]
     pub extra: std::collections::BTreeMap<String, serde_json::Value>,
     pub pending_deletions: std::collections::BTreeSet<String>,
@@ -407,14 +408,18 @@ pub fn account_logout(
     remove_local: bool,
     store: tauri::State<Store>,
     runs: tauri::State<crate::running::Runs>,
+    attempts: tauri::State<crate::login::Attempts>,
 ) -> Result<serde_json::Value, crate::error::ApiError> {
-    crate::running::ensure_idle(&runs)?;
-    let pending = if remove_local {
-        crate::deletions::remove(&store, &crate::accounts::uid(&*store.data.lock()?))?
-    } else {
-        store.update(|d| crate::accounts::logout(d, false))?;
-        false
-    };
+    let pending = runs.idle(|| {
+        attempts.invalidate()?;
+        let pending = if remove_local {
+            crate::deletions::remove(&store, &crate::accounts::uid(&*store.data.lock()?))?
+        } else {
+            store.update(|d| crate::accounts::logout(d, false))?;
+            false
+        };
+        Ok(pending)
+    })?;
     Ok(serde_json::json!({"cleanupPending":pending}))
 }
 pub(crate) fn device_view(d: &Data) -> serde_json::Value {
