@@ -69,6 +69,44 @@ export async function startRun({ mode, uid }) {
 export function cancelRun(id) {
   return invoke("run_cancel", { id });
 }
+// Restore the Rust-owned registry when a console mounts or a task is created.
+export function subscribeCurrentRun(onState) {
+  let stopped = false,
+    busy = false,
+    again = false,
+    unlisten = null;
+  const check = async () => {
+    if (stopped) return;
+    if (busy) {
+      again = true;
+      return;
+    }
+    busy = true;
+    try {
+      const state = await invoke("run_current");
+      if (!stopped) onState(state);
+    } catch {
+    } finally {
+      busy = false;
+      if (again) {
+        again = false;
+        void check();
+      }
+    }
+  };
+  window.__TAURI__?.event
+    ?.listen("job-updated", check)
+    .then((fn) => {
+      if (stopped) fn();
+      else unlisten = fn;
+    })
+    .catch(() => {});
+  void check();
+  return () => {
+    stopped = true;
+    unlisten?.();
+  };
+}
 export function subscribeRun(id, { onLog, onDone, onFaceRequest }) {
   let stopped = false,
     offset = 0,
