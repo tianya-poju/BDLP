@@ -1,7 +1,13 @@
+import { logins } from "./login-client.js";
 import { toast } from "./util.js";
 import { Geo } from "./amap-adapter.js";
 import { pickTerm, normalizeTermScore } from "./term-score.js";
-import { startRun, cancelRun, subscribeRun } from "./run-client.js";
+import {
+  startRun,
+  cancelRun,
+  subscribeRun,
+  subscribeCurrentRun,
+} from "./run-client.js";
 import { calculatePreview, cancelPreviews } from "./preview-client.js";
 import { PACE_OPTIONS, calculate } from "./pace.js";
 import { DEVICE_PRESETS } from "./devices.js";
@@ -119,22 +125,26 @@ const endpoints = {
   deviceHistoryClear: () =>
     invoke("device_history_update", { id: "", clear: true }),
   refreshProfile: () => read("profile"),
-  logout: (removeLocal = false) => {
+  logout: async (removeLocal = false) => {
+    await logins.cancel();
     cachedRules = null;
     return accountMutation("account_logout", { removeLocal });
   },
-  accountsSelect: (uid) => {
+  accountsSelect: async (uid) => {
+    await logins.cancel();
     cachedRules = null;
     return invoke("account_select", { uid: String(uid) });
   },
   accountsRename: (uid, label) =>
     invoke("account_rename", { uid: String(uid), label }),
-  accountsRemove: (uid) =>
-    accountMutation("account_remove", { uid: String(uid) }),
-  wechatLoginStart: () => invoke("wechat_login_start"),
+  accountsRemove: async (uid) => {
+    await logins.cancel();
+    return accountMutation("account_remove", { uid: String(uid) });
+  },
+  wechatLoginStart: (attemptId) => invoke("wechat_login_start", { attemptId }),
   wechatLoginPoll: (sid) => invoke("wechat_login_poll", { sid }),
   wechatLoginCancel: (sid) => invoke("wechat_login_cancel", { sid }),
-  qqLoginStart: () => invoke("qq_login_start"),
+  qqLoginStart: (attemptId) => invoke("qq_login_start", { attemptId }),
   records: async (year, page = 1) => {
     const reply = await read("records", {
       year: String(year),
@@ -422,3 +432,4 @@ const endpoints = {
 };
 export const api = Object.freeze(endpoints);
 export const subscribeJob = subscribeRun;
+export const subscribeJobs = subscribeCurrentRun;
