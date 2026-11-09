@@ -144,6 +144,8 @@ export function toast(message, kind = "", ms = 3600) {
  * 打开模态：openModal({title, body:[nodes], footer:[buttons], onClose})
  * 返回 {close}
  */
+const modalStack = [];
+let modalOverflow = "";
 export function openModal({
   title,
   body = [],
@@ -157,9 +159,21 @@ export function openModal({
     style: wide ? { maxWidth: "720px" } : {},
   });
   const overlay = h("div", { class: "overlay" }, [modal]);
+  let closed = false;
+  const esc = (e) => {
+    if (e.key === "Escape" && modalStack.at(-1) === overlay) {
+      e.stopImmediatePropagation();
+      close();
+    }
+  };
   const close = () => {
+    if (closed) return;
+    closed = true;
+    document.removeEventListener("keydown", esc);
+    const index = modalStack.indexOf(overlay);
+    if (index >= 0) modalStack.splice(index, 1);
     overlay.remove();
-    document.body.style.overflow = "";
+    if (!modalStack.length) document.body.style.overflow = modalOverflow;
     if (onClose) onClose();
   };
   const head = h("div", { class: "modal-head" }, [
@@ -179,12 +193,9 @@ export function openModal({
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) close();
   });
-  document.addEventListener("keydown", function esc(e) {
-    if (e.key === "Escape") {
-      close();
-      document.removeEventListener("keydown", esc);
-    }
-  });
+  document.addEventListener("keydown", esc);
+  if (!modalStack.length) modalOverflow = document.body.style.overflow;
+  modalStack.push(overlay);
   document.body.appendChild(overlay);
   document.body.style.overflow = "hidden";
   return { close, bodyEl, overlay };
