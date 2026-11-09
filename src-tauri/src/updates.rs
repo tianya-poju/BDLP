@@ -282,7 +282,7 @@ mod tests {
     #[ignore]
     fn published_release_readonly() {
         let r = tauri::async_runtime::block_on(fetch()).unwrap();
-        assert_eq!(r.latest_version.as_deref(), Some("1.1.0"));
+        assert_eq!(r.latest_version.as_deref(), Some(env!("CARGO_PKG_VERSION")));
         assert_eq!(r.status, "current");
         let response = reqwest::Client::new();
         let bytes = tauri::async_runtime::block_on(async {
@@ -296,7 +296,10 @@ mod tests {
                 .await
                 .unwrap()
         });
-        assert_eq!(parse(&bytes, "1.0.0").unwrap().status, "available");
-        println!("Published release confirmed: 1.1.0; 1.0.0 detects available update");
+        assert_eq!(parse(&bytes, "1.1.0").unwrap().status, "available");
+        println!(
+            "Published release confirmed: {}; 1.1.0 detects available update",
+            env!("CARGO_PKG_VERSION")
+        );
     }
 }
