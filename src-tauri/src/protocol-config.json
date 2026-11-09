@@ -1,0 +1,133 @@
+{
+  "SALT_N": "rDJiNB9j7vD2",
+  "SALT_P": "eFoqdHOdDy6ViJ0i",
+  "KEY_NG": "goMEzJ1pDpncNHb9",
+  "IV_NG": "ZUrAS2lUidjyY2gK",
+  "KEY_TRK": "Wet2C8d34f62ndi3",
+  "IV_TRK": "K6iv85jBD8jgf32D",
+  "Z8": [
+    [
+      "R7gT3pL9sF2kD5mQ",
+      "B8jN4wH6xJ2vK7rE"
+    ],
+    [
+      "M5dS8fG3hJ7kL2pR",
+      "C9tY6rU3eW4qX8sZ"
+    ],
+    [
+      "P2bN7vF4cD9mK6jA",
+      "S3nH5gJ8dL2fT9wQ"
+    ],
+    [
+      "X6rV9tB3yG5hN7kP",
+      "E4sW2qA8dZ6fC3jM"
+    ],
+    [
+      "K8jD3mF7nH2pL5rT",
+      "Q6wS4eX9cV2bN7gJ"
+    ],
+    [
+      "F3dG7hJ2kL5pM8rN",
+      "Z9xC4vB6nA2sD7fH"
+    ],
+    [
+      "B5vN8cM3xZ6dF2gJ",
+      "H7kL4jP9mQ2rT5sW"
+    ],
+    [
+      "N6mK3lJ7pO2iU5yT",
+      "G8hF4dS2fA6gH9jK"
+    ],
+    [
+      "V2bC7nM3vX6cZ9dF",
+      "J5kL8jH3gD7fS2dA"
+    ],
+    [
+      "H9jG4fD7sA2dF5gH",
+      "K3lJ6pO9iU2yT5rE"
+    ]
+  ],
+  "T15": [
+    [
+      "G7kH3jP8mQ2rT5sW",
+      "D9fS2aQ6wE3dF8gH"
+    ],
+    [
+      "Y4tR7eW2qS5dF9jK",
+      "P3oI6uY8rE2tW5qS"
+    ],
+    [
+      "C8vB5nM3xZ7cX2dF",
+      "L6jK9lJ4pO3iU7yT"
+    ],
+    [
+      "Q5sA3dF8gH2jK7lJ",
+      "R9tY4eU6iO5pJ3lK"
+    ],
+    [
+      "N2mK8lJ5pO7iU3yT",
+      "F4gH6jK9lJ2pO5iU"
+    ],
+    [
+      "X3rV6tB4yG8hN2kP",
+      "B7vC3nX5mZ9dF4gH"
+    ],
+    [
+      "M9dS4fG6hJ3kL8pR",
+      "E5sW7qA2dZ4fC9jM"
+    ],
+    [
+      "K6jD8mF3nH5pL2rT",
+      "Z3xC6vB8nA4sD5fH"
+    ],
+    [
+      "V7bC4nM6vX8cZ3dF",
+      "H2jG5fD7sA3dF9gH"
+    ],
+    [
+      "S8dF5aQ3wE7rT2yU",
+      "J4kH8gF3dS6aQ5wE"
+    ],
+    [
+      "A6gH2jK7lJ4pO8iU",
+      "T3rE7yU5iO6pJ2lK"
+    ],
+    [
+      "B4vN7cM2xZ5dF8gJ",
+      "W6qE3sA8dF2gH5jK"
+    ],
+    [
+      "F2dG5hJ8kL6pM3rN",
+      "I7uO4pJ2lK8jH3gF"
+    ],
+    [
+      "P8bN3vF5cD7mK4jA",
+      "X5rV2tB7yG4hN9kP"
+    ],
+    [
+      "O4iU7yT2rE5tW8qS",
+      "G3hF6dS4fA7gH2jK"
+    ]
+  ],
+  "UMID": "7c0d3e6f9g2h5i8j1k4l7m0n3o6p9q2r",
+  "qq_url": "https://openmobile.qq.com/oauth2.0/m_authorize?_wv=3&status_os=12&client_id=1105660458&format=json&switch=1&status_version=32&pf=openmobile_android&sdkp=a&sdkv=null&sign=&time=1793788351&scope=get_user_info,get_simple_userinfo,get_user_profile&style=qr&redirect_uri=auth%3A%2F%2Ftauth.qq.com%2F&display=mobile&response_type=token&loginfrom=main&cancel_display=1&_wwv=2",
+  "version": "232",
+  "version_name": "4.3.2",
+  "WX_APP_ID": "wx5a2e1ff396785475",
+  "WX_APP_SECRET": "cdb20f1be2d3cac7f46664c742937a54",
+  "WX_BUNDLE_ID": "com.lptiyu.tanke",
+  "WX_SCOPE": "snsapi_base,snsapi_userinfo,snsapi_friend,snsapi_message",
+  "WX_STATE": "weixin",
+  "W8": [
+    "aB3dE9fG2hJkL5mN",
+    "PqR7sT8uV9wXyZ1",
+    "A2bC3dE4fG5hI6j",
+    "K7lM8nO9pQ0rS1t",
+    "U2vW3xY4zA5bC6d",
+    "E7fG8hI9jK0lM1n",
+    "O2pQ3rS4tU5vW6x",
+    "Y7zA8bC9dE0fG1h",
+    "I2jK3lM4nO5pQ6r",
+    "S7tU8vW9xY0zA1b"
+  ]
+}
