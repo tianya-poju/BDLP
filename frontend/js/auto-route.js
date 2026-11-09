@@ -10,6 +10,12 @@ export function autoRoute(app, { onApplied, onClose } = {}) {
     progressTimer = null,
     appliedPoints = null;
   let progressBusy = false;
+  let polling = false;
+  function stopPolling() {
+    polling = false;
+    clearInterval(progressTimer);
+    progressTimer = null;
+  }
   const status = h("p", {
     class: "hint",
     text: "正在读取学校规则和全部打卡点…",
@@ -63,7 +69,7 @@ export function autoRoute(app, { onApplied, onClose } = {}) {
     onClose: () => {
       if (closed) return;
       closed = true;
-      clearInterval(progressTimer);
+      stopPolling();
       invoke("route_plan_cancel", { id }).catch(() => {});
       map?.remove();
       onClose?.();
@@ -72,14 +78,15 @@ export function autoRoute(app, { onApplied, onClose } = {}) {
   // Map initialization and result rendering are discarded when the dialog is closed.
   Promise.resolve().then(async () => {
     if (closed) return;
-    map = createBaseMap(mapEl);
     try {
+      map = createBaseMap(mapEl);
+      polling = true;
       progressTimer = setInterval(async () => {
-        if (closed || progressBusy) return;
+        if (closed || !polling || progressBusy) return;
         progressBusy = true;
         try {
           const p = await invoke("route_plan_status", { id });
-          if (!closed) {
+          if (!closed && polling) {
             status.textContent = `${p.phase} · ${p.completed}/${p.total} 段`;
             requestStats.textContent = `请求 ${p.requests} 次 · 缓存命中 ${p.cacheHits} 段`;
           }
@@ -88,8 +95,12 @@ export function autoRoute(app, { onApplied, onClose } = {}) {
           progressBusy = false;
         }
       }, 500);
-      const r = await invoke("route_plan", { id });
-      clearInterval(progressTimer);
+      let r;
+      try {
+        r = await invoke("route_plan", { id });
+      } finally {
+        stopPolling();
+      }
       if (closed) return;
       appliedPoints = r.points;
       drawFence(map, r.fence || []);
@@ -225,7 +236,7 @@ export function autoRoute(app, { onApplied, onClose } = {}) {
         );
       apply.disabled = !r.canApply || !ready || !sampled || missed.length > 0;
     } catch (e) {
-      clearInterval(progressTimer);
+      stopPolling();
       if (!closed) {
         status.textContent = e.message;
         status.className = "hint danger";
