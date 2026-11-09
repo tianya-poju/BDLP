@@ -12,9 +12,7 @@ pub(super) fn same(a: &Data, b: &Data) -> bool {
     state::TaskContext::from(a).matches(b)
 }
 pub(super) fn guard(job: &Job, store: &Store) -> Result<(), crate::error::ApiError> {
-    if job.cancel.load(Ordering::SeqCst) {
-        return Err(crate::error::ApiError::cancelled());
-    }
+    job.progress().check()?;
     if !same(&job.data, &*store.data.lock()?) {
         return Err("账号、学校、跑区或设备已切换，任务已停止".into());
     }
@@ -29,7 +27,7 @@ pub(crate) fn ensure_idle(runs: &Runs) -> Result<(), crate::error::ApiError> {
         .lock()
         .map_err(|_| "任务不可用")?
         .iter()
-        .any(|j| j.state.lock().map(|s| active(&s.status)).unwrap_or(true))
+        .any(|j| j.blocking())
     {
         return Err("有任务在运行，请先结束或取消后再操作账号".into());
     }
@@ -43,36 +41,38 @@ pub(crate) fn check_job(id: &str, app: &tauri::AppHandle) -> Result<(), crate::e
 pub(crate) fn begin_execution(
     id: &str,
     app: &tauri::AppHandle,
-) -> Result<Data, crate::error::ApiError> {
+) -> Result<(Data, state::Execution), crate::error::ApiError> {
     let j = get(&app.state::<Runs>(), id)?;
     guard(&j, &app.state::<Store>())?;
-    let mut s = j.state.lock().map_err(|_| "任务不可用")?;
+    let mut s = j.progress();
     if s.executing || s.status != TaskStatus::Running {
         return Err("任务已经启动或结束".into());
     }
     s.executing = true;
-    Ok(j.data.clone())
+    drop(s);
+    Ok((j.data.clone(), state::Execution(j)))
 }
 pub(crate) fn awaiting(id: &str, app: &tauri::AppHandle, value: Value) {
     if let Ok(j) = get(&app.state::<Runs>(), id) {
-        if let Ok(mut s) = j.state.lock() {
+        {
+            let mut s = j.progress();
             s.awaiting = value;
         }
     }
 }
 pub(crate) fn finish_local(id: &str, app: &tauri::AppHandle, result: Value) {
     if let Ok(j) = get(&app.state::<Runs>(), id) {
-        if let Ok(mut s) = j.state.lock() {
-            s.finish_photo_check(j.cancel.load(Ordering::SeqCst), result);
+        {
+            let mut s = j.progress();
+            let cancelled = s.cancelled || s.faulted;
+            s.finish_photo_check(cancelled, result);
         }
     }
 }
 
 pub(crate) fn rules_for(id: &str, app: &tauri::AppHandle) -> Result<Value, crate::error::ApiError> {
     get(&app.state::<Runs>(), id)?
-        .state
-        .lock()
-        .map_err(|_| "任务不可用")?
+        .progress()
         .rules
         .clone()
         .ok_or("学校规则未加载".into())
@@ -81,9 +81,5 @@ pub(crate) fn mode_for(id: &str, app: &tauri::AppHandle) -> Result<String, crate
     Ok(get(&app.state::<Runs>(), id)?.mode.clone())
 }
 pub(crate) fn clock_for(id: &str, app: &tauri::AppHandle) -> Result<i64, crate::error::ApiError> {
-    Ok(get(&app.state::<Runs>(), id)?
-        .state
-        .lock()
-        .map_err(|_| "任务不可用")?
-        .clock)
+    Ok(get(&app.state::<Runs>(), id)?.progress().clock)
 }
