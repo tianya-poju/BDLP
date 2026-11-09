@@ -4,14 +4,14 @@ use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
     time::{Duration, Instant},
 };
 use tauri::{Emitter, Manager};
 #[derive(Default)]
-pub struct Sessions(Mutex<BTreeMap<String, Session>>, AtomicU64);
+pub struct Sessions(Mutex<BTreeMap<String, Session>>);
 struct Session {
     cancel: Arc<AtomicBool>,
     status: String,
@@ -66,8 +66,16 @@ async fn get_text(
     String::from_utf8(b.to_vec()).map_err(|_| "微信响应编码无效".into())
 }
 #[tauri::command]
-pub async fn wechat_login_start(app: tauri::AppHandle) -> Result<Value, crate::error::ApiError> {
-    let generation = app.state::<Sessions>().1.fetch_add(1, Ordering::SeqCst) + 1;
+pub async fn wechat_login_start(
+    attempt_id: String,
+    app: tauri::AppHandle,
+) -> Result<Value, crate::error::ApiError> {
+    app.state::<crate::login::Attempts>().check(
+        &attempt_id,
+        "wechat",
+        &app.state::<crate::store::Store>(),
+    )?;
+    crate::running::ensure_idle(&app.state::<crate::running::Runs>())?;
     {
         let sessions = app.state::<Sessions>();
         let mut map = sessions.0.lock().map_err(|_| "扫码状态不可用")?;
@@ -134,13 +142,15 @@ pub async fn wechat_login_start(app: tauri::AppHandle) -> Result<Value, crate::e
     } else {
         return Err("微信返回的不是有效二维码图片".into());
     };
-    let id = uuid::Uuid::new_v4().to_string();
+    let id = attempt_id;
     let cancel = Arc::new(AtomicBool::new(false));
     {
         let state = app.state::<Sessions>();
-        if state.1.load(Ordering::SeqCst) != generation {
-            return Err("已被新的扫码请求替代".into());
-        }
+        app.state::<crate::login::Attempts>().check(
+            &id,
+            "wechat",
+            &app.state::<crate::store::Store>(),
+        )?;
         state.0.lock().map_err(|_| "扫码状态不可用")?.insert(
             id.clone(),
             Session {
@@ -160,7 +170,11 @@ pub async fn wechat_login_start(app: tauri::AppHandle) -> Result<Value, crate::e
         match result {
             Ok(()) => {
                 status(&task_app, &task_id, "done", "登录成功");
-                let _ = task_app.emit_to("main", "login-result", json!({"ok":true}));
+                let _ = task_app.emit_to(
+                    "main",
+                    "login-result",
+                    json!({"ok":true,"attemptId":task_id}),
+                );
             }
             Err(e) => status(&task_app, &task_id, "error", &e.message),
         }
@@ -183,10 +197,20 @@ async fn wait(
         if cancel.load(Ordering::SeqCst) {
             return Err("已取消".into());
         }
+        app.state::<crate::login::Attempts>().check(
+            id,
+            "wechat",
+            &app.state::<crate::store::Store>(),
+        )?;
         tokio::time::sleep(Duration::from_secs(if last == 404 { 1 } else { 3 })).await;
         if cancel.load(Ordering::SeqCst) {
             return Err("已取消".into());
         }
+        app.state::<crate::login::Attempts>().check(
+            id,
+            "wechat",
+            &app.state::<crate::store::Store>(),
+        )?;
         let last_string = last.to_string();
         let body = get_text(
             client,
@@ -198,6 +222,11 @@ async fn wait(
         if cancel.load(Ordering::SeqCst) {
             return Err("已取消".into());
         }
+        app.state::<crate::login::Attempts>().check(
+            id,
+            "wechat",
+            &app.state::<crate::store::Store>(),
+        )?;
         last = poll_code(&body);
         match last {
             405 => {
@@ -231,14 +260,8 @@ async fn wait(
                 if cancel.load(Ordering::SeqCst) {
                     return Err("已取消".into());
                 }
-                return crate::network::finish(
-                    app.clone(),
-                    openid.into(),
-                    access.into(),
-                    "3",
-                    Some(cancel),
-                )
-                .await;
+                return crate::network::finish(app.clone(), openid.into(), access.into(), "3", id)
+                    .await;
             }
             402 => return Err("二维码已过期，请重新获取".into()),
             403 => return Err("已取消微信授权".into()),
@@ -262,7 +285,9 @@ pub fn wechat_login_poll(
 pub fn wechat_login_cancel(
     sid: String,
     state: tauri::State<Sessions>,
+    app: tauri::AppHandle,
 ) -> Result<(), crate::error::ApiError> {
+    app.state::<crate::login::Attempts>().cancel(&sid)?;
     let mut map = state.0.lock().map_err(|_| "扫码状态不可用")?;
     if let Some(s) = map.remove(&sid) {
         s.cancel.store(true, Ordering::SeqCst)
