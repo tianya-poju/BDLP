@@ -1,6 +1,21 @@
 use super::*;
 #[derive(Default)]
 pub struct Runs(pub(super) Mutex<VecDeque<Arc<Job>>>);
+impl Runs {
+    pub(crate) fn idle<T>(
+        &self,
+        action: impl FnOnce() -> Result<T, crate::error::ApiError>,
+    ) -> Result<T, crate::error::ApiError> {
+        let jobs = self
+            .0
+            .lock()
+            .map_err(|_| crate::error::ApiError::invalid("任务不可用"))?;
+        if jobs.iter().any(|j| j.blocking()) {
+            return Err("有任务在运行，请先结束或取消后再操作账号".into());
+        }
+        action()
+    }
+}
 pub(super) struct Job {
     pub(super) id: JobId,
     pub(super) data: Data,
