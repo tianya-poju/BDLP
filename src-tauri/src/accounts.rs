@@ -76,9 +76,12 @@ pub fn account_select(
     uid: String,
     store: tauri::State<Store>,
     runs: tauri::State<crate::running::Runs>,
+    attempts: tauri::State<crate::login::Attempts>,
 ) -> Result<(), crate::error::ApiError> {
-    crate::running::ensure_idle(&runs)?;
-    store.try_update(|d| select(d, &uid))
+    runs.idle(|| {
+        attempts.invalidate()?;
+        store.try_update(|d| select(d, &uid))
+    })
 }
 #[tauri::command]
 pub fn account_rename(
@@ -112,9 +115,12 @@ pub fn account_remove(
     uid: String,
     store: tauri::State<Store>,
     runs: tauri::State<crate::running::Runs>,
+    attempts: tauri::State<crate::login::Attempts>,
 ) -> Result<serde_json::Value, crate::error::ApiError> {
-    crate::running::ensure_idle(&runs)?;
-    let pending = crate::deletions::remove(&store, &uid)?;
+    let pending = runs.idle(|| {
+        attempts.invalidate()?;
+        crate::deletions::remove(&store, &uid)
+    })?;
     Ok(json!({"cleanupPending":pending}))
 }
 
@@ -124,6 +130,7 @@ pub fn logout(d: &mut Data, remove: bool) {
     if remove {
         d.profiles.remove(&id);
         d.run_receipts.remove(&id);
+        d.receipt_history.remove(&id);
     } else if let Some(p) = d.profiles.get_mut(&id) {
         p.account.token = "".to_string();
         p.account.refresh_token = Some("".to_string());
