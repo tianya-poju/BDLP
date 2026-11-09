@@ -15,6 +15,7 @@ mod models;
 mod native_runner;
 mod network;
 mod planner;
+mod protocol_config;
 mod receipts;
 mod running;
 mod schools;
