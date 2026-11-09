@@ -1,0 +1,14 @@
+{
+  "name": "budao-lepao-build",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build:frontend": "node tools/build-frontend.cjs",
+    "test": "node tools/build-frontend.cjs && node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "@amap/amap-jsapi-loader": "1.0.1",
+    "esbuild": "0.25.12"
+  },
+  "type": "module"
+}
