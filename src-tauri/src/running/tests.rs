@@ -37,6 +37,31 @@ mod tests {
         }
     }
     #[test]
+    fn login_cannot_begin_or_commit_while_a_task_owns_the_account() {
+        let root = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        let store = Store::open(root.join("settings.dpapi")).unwrap();
+        let j = Arc::new(job());
+        store.update(|d| *d = j.data.clone()).unwrap();
+        let attempts = crate::login::Attempts::default();
+        let runs = Runs::default();
+        let id = uuid::Uuid::new_v4().to_string();
+        attempts.begin(&id, "qq", &store, &runs).unwrap();
+        runs.0.lock().unwrap().push_back(j.clone());
+        assert!(attempts
+            .begin(&uuid::Uuid::new_v4().to_string(), "wechat", &store, &runs)
+            .is_err());
+        assert!(attempts
+            .commit(&id, "qq", &store, &runs, |d| {
+                d.account.uid = "wrong".into();
+                Ok(())
+            })
+            .is_err());
+        assert_eq!(store.data.lock().unwrap().account.uid, j.data.account.uid);
+        j.cancel().unwrap();
+        assert!(runs.idle(|| Ok(())).is_ok());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
     fn cancelled_step_blocks_other_jobs_until_inflight_step_exits() {
         let j = job();
         let step = j.step().unwrap();
