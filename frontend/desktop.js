@@ -1,3 +1,4 @@
+import { logins } from "./js/login-client.js";
 import { updates } from "./js/updates.js";
 import { installLifecycle } from "./js/lifecycle-ui.js";
 
@@ -36,7 +37,8 @@ const app = {
 };
 let currentView = null,
   renderedPage = null,
-  activeLoginView = null;
+  activeLoginView = null,
+  loginModal = null;
 const root = document.querySelector("#view");
 const nav = {
   console: ConsoleView,
@@ -114,13 +116,16 @@ function login() {
   const loginView = LoginView(app);
   activeLoginView = loginView;
   const body = h("div", { class: "col" }, [loginView.el]);
-  openModal({
+  loginModal = openModal({
     title: "添加账号",
     body,
     wide: true,
     onClose: () => {
       loginView.destroy();
-      activeLoginView = null;
+      if (activeLoginView === loginView) {
+        activeLoginView = null;
+        loginModal = null;
+      }
     },
   });
 }
@@ -128,20 +133,21 @@ app.openAddAccount = login;
 installLifecycle(app);
 window.__TAURI__.event
   .listen("login-result", async ({ payload }) => {
+    if (!logins.finish(payload)) return;
+    const revision = logins.revision();
     if (payload.ok) {
-      activeLoginView?.destroy();
-      activeLoginView = null;
+      loginModal?.close();
       toast("登录成功");
-      document.querySelectorAll(".overlay").forEach((x) => x.remove());
-      document.body.style.overflow = "";
       await refresh();
+      if (logins.revision() !== revision) return;
       try {
         await api.zoneConfig(true);
         await refresh();
       } catch (e) {
-        toast(`登录成功，跑区读取失败：${String(e)}`, "warn");
+        if (logins.revision() === revision)
+          toast(`登录成功，跑区读取失败：${String(e)}`, "warn");
       }
-      show("console");
+      if (logins.revision() === revision) show("console");
     } else toast(payload.error || "登录失败", "danger");
   })
   .catch(() => toast("无法注册登录通知", "danger"));
