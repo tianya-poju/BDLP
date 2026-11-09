@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "不道乐跑",
+  "version": "1.0.0",
+  "identifier": "cn.lepaopoju.desktop.dev",
+  "build": {
+    "frontendDist": "../build/frontend",
+    "beforeBuildCommand": "node tools/build-frontend.cjs"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "不道乐跑",
+        "width": 1100,
+        "height": 760,
+        "minWidth": 760,
+        "minHeight": 520,
+        "create": false,
+        "devtools": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-eval' https://webapi.amap.com https://*.amap.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.amap.com https://*.autonavi.com; connect-src 'self' ipc: http://ipc.localhost https://*.amap.com https://*.autonavi.com; worker-src 'self' blob:; font-src 'self' data: https://*.amap.com"
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "allowDowngrades": true
+    }
+  },
+  "mainBinaryName": "budao-lepao"
+}
