@@ -5,9 +5,66 @@ pub(super) struct Job {
     pub(super) id: JobId,
     pub(super) data: Data,
     pub(super) mode: String,
-    pub(super) cancel: AtomicBool,
-    pub(super) busy: AtomicBool,
     pub(super) state: Mutex<Progress>,
+}
+impl Job {
+    /// Poisoned data may be inspected for diagnosis, but can never resume execution.
+    pub(super) fn progress(&self) -> std::sync::MutexGuard<'_, Progress> {
+        match self.state.lock() {
+            Ok(state) => state,
+            Err(poison) => {
+                let mut state = poison.into_inner();
+                state.stop_fault();
+                self.state.clear_poison();
+                state
+            }
+        }
+    }
+    pub(super) fn blocking(&self) -> bool {
+        let state = self.progress();
+        state.status.active() || state.busy || state.executing
+    }
+    pub(super) fn step(&self) -> Result<Step<'_>, crate::error::ApiError> {
+        let mut state = self.progress();
+        state.check()?;
+        if state.busy {
+            return Err("上一任务步骤仍在执行".into());
+        }
+        state.busy = true;
+        Ok(Step(self))
+    }
+    pub(super) fn cancel(&self) -> Result<(), crate::error::ApiError> {
+        let mut state = self.progress();
+        if matches!(state.status, TaskStatus::Submitting | TaskStatus::Submitted) {
+            return Err("记录已进入提交阶段，无法撤销；请等待结果并核对记录，勿重复提交".into());
+        }
+        if state.status.active() {
+            state.cancelled = true;
+            state.status = TaskStatus::Cancelled;
+            state.error = "已取消；已发送的心跳或文件无法撤回，未继续提交记录".into();
+        }
+        Ok(())
+    }
+}
+pub(super) struct Step<'a>(&'a Job);
+impl Drop for Step<'_> {
+    fn drop(&mut self) {
+        let mut state = self.0.progress();
+        if std::thread::panicking() {
+            state.stop_fault()
+        }
+        state.busy = false;
+    }
+}
+pub(crate) struct Execution(pub(super) Arc<Job>);
+impl Drop for Execution {
+    fn drop(&mut self) {
+        let mut state = self.0.progress();
+        if state.status.active() {
+            state.stop_fault()
+        }
+        state.executing = false;
+    }
 }
 /// A task check compares only its immutable identity, never profiles, photos or routes.
 pub(super) struct TaskContext<'a> {
@@ -57,6 +114,9 @@ impl TaskStatus {
 
 #[derive(Default)]
 pub(super) struct Progress {
+    pub(super) busy: bool,
+    pub(super) cancelled: bool,
+    pub(super) faulted: bool,
     pub(super) status: TaskStatus,
     pub(super) logs: Vec<String>,
     pub(super) log_start: u64,
@@ -76,6 +136,45 @@ pub(super) struct Progress {
     pub(super) executing: bool,
 }
 impl Progress {
+    pub(super) fn submission_ready(&self) -> Result<(), crate::error::ApiError> {
+        self.check()?;
+        if self.status != TaskStatus::Running {
+            return Err("提交已发出，不能重复发送".into());
+        }
+        Ok(())
+    }
+    pub(super) fn stop_fault(&mut self) {
+        self.faulted = true;
+        self.cancelled = true;
+        self.awaiting = Value::Null;
+        self.status = if self.submit.is_some()
+            || matches!(
+                self.status,
+                TaskStatus::Submitting | TaskStatus::Submitted | TaskStatus::Unknown
+            ) {
+            TaskStatus::Unknown
+        } else {
+            TaskStatus::Failed
+        };
+        self.error = if self.status == TaskStatus::Unknown {
+            "任务异常，提交结果未确认；请核对记录，勿重复提交"
+        } else {
+            "任务内部状态异常，已停止；未继续提交"
+        }
+        .into();
+    }
+    pub(super) fn check(&self) -> Result<(), crate::error::ApiError> {
+        if self.faulted {
+            return Err(crate::error::ApiError::invalid("任务内部状态异常，已停止"));
+        }
+        if self.cancelled {
+            return Err(crate::error::ApiError::cancelled());
+        }
+        if !self.status.active() {
+            return Err("任务已结束".into());
+        }
+        Ok(())
+    }
     pub(super) fn finish_photo_check(&mut self, cancelled: bool, result: Value) {
         if !cancelled && self.status == TaskStatus::Running {
             self.status = TaskStatus::Done;
