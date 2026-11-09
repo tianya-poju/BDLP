@@ -12,10 +12,7 @@ use serde_json::{json, Value};
 use sha1::Sha1;
 use std::{
     collections::{BTreeMap, VecDeque},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
+    sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{Emitter, Manager};
@@ -86,10 +83,7 @@ pub fn run_current(
     let current = jobs
         .iter()
         .rev()
-        .find(|j| {
-            j.data.account.uid.clone() == uid
-                && j.state.lock().map(|s| active(&s.status)).unwrap_or(false)
-        })
+        .find(|j| j.data.account.uid.clone() == uid && j.blocking())
         .map(|j| json!({"id":j.id,"mode":j.mode}));
     let latest = jobs
         .iter()
@@ -105,10 +99,7 @@ pub fn run_resolve(
     runs: tauri::State<Runs>,
 ) -> Result<(), crate::error::ApiError> {
     let jobs = runs.0.lock().map_err(|_| "任务不可用")?;
-    if jobs
-        .iter()
-        .any(|j| j.state.lock().map(|s| active(&s.status)).unwrap_or(true))
-    {
+    if jobs.iter().any(|j| j.blocking()) {
         return Err("任务仍在处理，请等待结果".into());
     }
     store.try_update(|d| {
@@ -123,13 +114,6 @@ pub fn run_resolve(
         Ok(())
     })
 }
-struct Busy<'a>(&'a AtomicBool);
-impl Drop for Busy<'_> {
-    fn drop(&mut self) {
-        self.0.store(false, Ordering::SeqCst)
-    }
-}
-
 #[tauri::command]
 pub fn run_open(
     mode: String,
@@ -156,10 +140,7 @@ pub fn run_open(
         return Err("请先选择跑区".into());
     }
     let mut jobs = runs.0.lock().map_err(|_| "任务不可用")?;
-    if jobs
-        .iter()
-        .any(|j| j.state.lock().map(|s| active(&s.status)).unwrap_or(true))
-    {
+    if jobs.iter().any(|j| j.blocking()) {
         return Err("已有跑步任务，请等待结束或取消".into());
     }
     let photos = crate::faces::run_photos(&store, &uid)?.len();
@@ -169,8 +150,6 @@ pub fn run_open(
         id: JobId(id),
         data: d,
         mode,
-        cancel: AtomicBool::new(false),
-        busy: AtomicBool::new(false),
         state: Mutex::new(Progress {
             status: TaskStatus::Running,
             ..Default::default()
@@ -191,7 +170,7 @@ pub fn run_status(
     if store.data.lock()?.account.uid != j.data.account.uid.clone() {
         return Err("任务属于其他账号".into());
     }
-    let s = j.state.lock().map_err(|_| "任务不可用")?;
+    let s = j.progress();
     Ok(
         json!({"id":id,"status":s.status,"logs":s.logs,"logStart":s.log_start,"error":s.error,"result":s.result,"awaiting":s.awaiting}),
     )
@@ -199,15 +178,7 @@ pub fn run_status(
 #[tauri::command]
 pub fn run_cancel(id: String, runs: tauri::State<Runs>) -> Result<Value, crate::error::ApiError> {
     let j = get(&runs, &id)?;
-    let mut s = j.state.lock().map_err(|_| "任务不可用")?;
-    if matches!(s.status, TaskStatus::Submitting | TaskStatus::Submitted) {
-        return Err("记录已进入提交阶段，无法撤销；请等待结果并核对记录，勿重复提交".into());
-    }
-    if active(&s.status) {
-        j.cancel.store(true, Ordering::SeqCst);
-        s.status = TaskStatus::Cancelled;
-        s.error = "已取消；已发送的心跳或文件无法撤回，未继续提交记录".into();
-    }
+    j.cancel()?;
     Ok(json!({"ok":true}))
 }
 
@@ -229,8 +200,6 @@ pub async fn face_validate(app: tauri::AppHandle) -> Result<Value, crate::error:
         id: JobId(id.clone()),
         data: d,
         mode: "photo_check".into(),
-        cancel: AtomicBool::new(false),
-        busy: AtomicBool::new(false),
         state: Mutex::new(Progress {
             status: TaskStatus::Running,
             rules: Some(json!({})),
@@ -240,10 +209,7 @@ pub async fn face_validate(app: tauri::AppHandle) -> Result<Value, crate::error:
     });
     {
         let mut jobs = runs.0.lock().map_err(|_| "任务不可用")?;
-        if jobs
-            .iter()
-            .any(|j| j.state.lock().map(|s| active(&s.status)).unwrap_or(true))
-        {
+        if jobs.iter().any(|j| j.blocking()) {
             return Err("已有任务正在运行".into());
         }
         jobs.push_back(job);
