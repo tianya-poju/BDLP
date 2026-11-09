@@ -34,6 +34,19 @@ pub struct Receipt {
     #[serde(flatten)]
     pub extra: std::collections::BTreeMap<String, Value>,
 }
+/// Preserve the prior account receipt in the same transaction as a new submission.
+pub(crate) fn replace(d: &mut crate::store::Data, uid: String, next: Receipt) {
+    if let Some(old) = d.run_receipts.get(&uid) {
+        if old.job_id == next.job_id {
+            return;
+        }
+        let archive = d.receipt_history.entry(uid.clone()).or_default();
+        if !archive.contains(old) {
+            archive.push(old.clone());
+        }
+    }
+    d.run_receipts.insert(uid, next);
+}
 fn record_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<RecordId>, D::Error> {
     let v = Value::deserialize(d)?;
     match v {
@@ -70,6 +83,97 @@ pub fn complete(
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn archive_is_atomic_account_scoped_and_survives_reopen() {
+        let root = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        let store = Store::open(root.join("settings.dpapi")).unwrap();
+        let old = Receipt {
+            job_id: JobId("old".into()),
+            status: ReceiptStatus::Unknown,
+            result: Some(json!({"pending":true})),
+            ..Default::default()
+        };
+        store
+            .update(|d| {
+                replace(d, "a".into(), old.clone());
+                replace(
+                    d,
+                    "b".into(),
+                    Receipt {
+                        job_id: JobId("other".into()),
+                        ..Default::default()
+                    },
+                );
+            })
+            .unwrap();
+        let next = Receipt {
+            job_id: JobId("new".into()),
+            ..Default::default()
+        };
+        store
+            .update(|d| replace(d, "a".into(), next.clone()))
+            .unwrap();
+        store
+            .update(|d| replace(d, "a".into(), next.clone()))
+            .unwrap();
+        let reopened = Store::open(store.path.clone()).unwrap();
+        let d = reopened.data.lock().unwrap();
+        assert_eq!(d.receipt_history["a"], vec![old]);
+        assert!(!d.receipt_history.contains_key("b"));
+        assert_eq!(d.run_receipts["a"].job_id, next.job_id);
+        assert_eq!(d.run_receipts["b"].job_id.0, "other");
+        drop(d);
+        std::fs::rename(&store.path, root.join("oldfile")).unwrap();
+        std::fs::create_dir(&store.path).unwrap();
+        assert!(store
+            .update(|d| replace(
+                d,
+                "a".into(),
+                Receipt {
+                    job_id: JobId("failed".into()),
+                    ..Default::default()
+                }
+            ))
+            .is_err());
+        let d = store.data.lock().unwrap();
+        assert_eq!(d.receipt_history["a"].len(), 1);
+        assert_eq!(d.run_receipts["a"].job_id.0, "new");
+        drop(d);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn legacy_data_and_account_deletion_keep_other_archives() {
+        let mut d:crate::store::Data=serde_json::from_str(r#"{"account":{"uid":"a","token":"test"},"run_receipts":{"a":{"jobId":"legacy","status":"pending"}}}"#).unwrap();
+        assert!(d.receipt_history.is_empty());
+        replace(
+            &mut d,
+            "a".into(),
+            Receipt {
+                job_id: JobId("next".into()),
+                ..Default::default()
+            },
+        );
+        replace(
+            &mut d,
+            "b".into(),
+            Receipt {
+                job_id: JobId("b-old".into()),
+                ..Default::default()
+            },
+        );
+        replace(
+            &mut d,
+            "b".into(),
+            Receipt {
+                job_id: JobId("b-new".into()),
+                ..Default::default()
+            },
+        );
+        crate::accounts::logout(&mut d, true);
+        assert!(!d.receipt_history.contains_key("a"));
+        assert!(d.receipt_history.contains_key("b"));
+        assert!(d.run_receipts.contains_key("b"));
+    }
     #[test]
     fn receipt_write_failure_preserves_pending_state_and_existing_receipt() {
         let root = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
