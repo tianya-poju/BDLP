@@ -420,7 +420,8 @@ pub(super) async fn run_action_inner(
                     if !same(v, data) {
                         return Err("账号已变化，未提交".into());
                     }
-                    v.run_receipts.insert(
+                    crate::receipts::replace(
+                        v,
                         data.account.uid.clone(),
                         Receipt {
                             job_id: JobId(id.clone()),
