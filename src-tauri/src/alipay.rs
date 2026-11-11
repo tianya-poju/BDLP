@@ -230,6 +230,16 @@ pub fn alipay_launch(url: String, app: tauri::AppHandle) -> Result<(), crate::er
     if expected != url {
         return Err("二维码已更新，请重新生成本次链接".into());
     }
+    launch(&url)
+}
+
+#[cfg(target_os = "android")]
+fn launch(url: &str) -> Result<(), crate::error::ApiError> {
+    crate::android::open_alipay(url)
+}
+
+#[cfg(windows)]
+fn launch(url: &str) -> Result<(), crate::error::ApiError> {
     use std::os::windows::ffi::OsStrExt;
     let wide = |s: &str| {
         std::ffi::OsStr::new(s)
@@ -252,7 +262,7 @@ pub fn alipay_launch(url: String, app: tauri::AppHandle) -> Result<(), crate::er
         ShellExecuteW(
             std::ptr::null_mut(),
             wide("open").as_ptr(),
-            wide(&url).as_ptr(),
+            wide(url).as_ptr(),
             std::ptr::null(),
             std::ptr::null(),
             1,
