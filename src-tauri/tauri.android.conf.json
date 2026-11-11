@@ -1,0 +1,11 @@
+{
+  "version": "1.1.2",
+  "identifier": "com.poju.budaolepao",
+  "app": {
+    "windows": [{ "label": "main", "title": "不道乐跑", "devtools": false, "useHttpsScheme": true }],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-eval' https://webapi.amap.com https://*.amap.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.amap.com https://*.autonavi.com; connect-src 'self' ipc: https://ipc.localhost https://*.amap.com https://*.autonavi.com; worker-src 'self' blob:; font-src 'self' data: https://*.amap.com"
+    }
+  },
+  "bundle": { "icon": ["icons/source.png"], "android": { "minSdkVersion": 26, "versionCode": 1001005 } }
+}
