@@ -52,11 +52,13 @@ pub struct Store {
     writer: Mutex<()>,
     pub(crate) files: Mutex<()>,
 }
+#[cfg(windows)]
 #[repr(C)]
 struct Blob {
     len: u32,
     ptr: *mut u8,
 }
+#[cfg(windows)]
 #[link(name = "crypt32")]
 unsafe extern "system" {
     fn CryptProtectData(
@@ -78,11 +80,13 @@ unsafe extern "system" {
         out: *mut Blob,
     ) -> i32;
 }
+#[cfg(windows)]
 #[link(name = "kernel32")]
 unsafe extern "system" {
     fn LocalFree(p: *mut std::ffi::c_void) -> *mut std::ffi::c_void;
     fn MoveFileExW(from: *const u16, to: *const u16, flags: u32) -> i32;
 }
+#[cfg(windows)]
 pub(crate) fn protect(bytes: &[u8], decrypt: bool) -> Result<Vec<u8>, crate::error::ApiError> {
     let input = Blob {
         len: bytes
@@ -127,6 +131,9 @@ pub(crate) fn protect(bytes: &[u8], decrypt: bool) -> Result<Vec<u8>, crate::err
     }
     Ok(result)
 }
+#[cfg(target_os = "android")]
+pub(crate) use crate::android::protect;
+
 impl Store {
     pub fn open(path: PathBuf) -> Result<Self, crate::error::ApiError> {
         let data = if path.exists() {
@@ -184,12 +191,8 @@ impl Store {
             .and_then(|_| file.sync_all())
             .map_err(|_| crate::error::ApiError::storage("无法保存本地数据"))?;
         drop(file);
-        use std::os::windows::ffi::OsStrExt;
-        let from: Vec<u16> = tmp.as_os_str().encode_wide().chain(Some(0)).collect();
-        let to: Vec<u16> = self.path.as_os_str().encode_wide().chain(Some(0)).collect();
-        if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), 1 | 8) } == 0 {
-            return Err(crate::error::ApiError::storage("无法替换本地数据文件"));
-        }
+        replace_file(&tmp, &self.path)
+            .map_err(|_| crate::error::ApiError::storage("无法替换本地数据文件"))?;
         *self
             .data
             .0
@@ -199,7 +202,11 @@ impl Store {
     }
 }
 pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let path = crate::data_root::root()?.join("settings.dpapi");
+    #[cfg(windows)]
+    let filename = "settings.dpapi";
+    #[cfg(target_os = "android")]
+    let filename = "settings.encrypted";
+    let path = crate::data_root::root()?.join(filename);
     let store = Store::open(path).map_err(std::io::Error::other)?;
     crate::deletions::recover(&store).map_err(std::io::Error::other)?;
     let needs_init = {
@@ -237,7 +244,7 @@ pub struct PublicAccount {
 #[derive(Serialize)]
 pub struct PublicData {
     cleanup_pending: bool,
-    version: &'static str,
+    version: String,
     accounts: Vec<serde_json::Value>,
     school_id: String,
     school_name: String,
@@ -250,14 +257,17 @@ pub struct PublicData {
     device_history: Vec<serde_json::Value>,
 }
 #[tauri::command]
-pub fn local_state(store: tauri::State<Store>) -> Result<PublicData, crate::error::ApiError> {
+pub fn local_state(
+    app: tauri::AppHandle,
+    store: tauri::State<Store>,
+) -> Result<PublicData, crate::error::ApiError> {
     let d = store
         .data
         .lock()
         .map_err(|_| crate::error::ApiError::storage("数据不可用"))?;
     Ok(PublicData {
         cleanup_pending: !d.pending_deletions.is_empty(),
-        version: env!("CARGO_PKG_VERSION"),
+        version: app.package_info().version.to_string(),
         accounts: crate::accounts::list(&d),
         school_id: d.school_id.clone(),
         school_name: d.school_name.clone(),
@@ -560,6 +570,7 @@ pub fn device_extra_save(
     })
 }
 
+#[cfg(windows)]
 pub(crate) fn replace_file(
     from_path: &std::path::Path,
     to_path: &std::path::Path,
@@ -572,6 +583,14 @@ pub(crate) fn replace_file(
     } else {
         Ok(())
     }
+}
+
+#[cfg(target_os = "android")]
+pub(crate) fn replace_file(
+    from_path: &std::path::Path,
+    to_path: &std::path::Path,
+) -> Result<(), crate::error::ApiError> {
+    fs::rename(from_path, to_path).map_err(|_| crate::error::ApiError::storage("文件保存失败"))
 }
 
 #[tauri::command]
