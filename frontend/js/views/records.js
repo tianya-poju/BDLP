@@ -27,7 +27,13 @@ export function RecordsView(app) {
   const rankCard = h("div", { class: "card" });
   const listCard = h("div", { class: "card" });
   let rankRequest = 0;
-  let year = pref.get("recordYear", new Date().getFullYear());
+  const pending = app.state.running?.pending ? app.state.running.receipt : null;
+  const receiptYear = pending
+    ? new Date(pending.time * 1000).getFullYear()
+    : null;
+  const receiptOwner = app.state.activeUid;
+  const reviewCard = pending ? h("div", { class: "card" }) : null;
+  let year = receiptYear || pref.get("recordYear", new Date().getFullYear());
   let loading = false;
   // 记录列表按 20 条一页加载（官方接口 10 条/页，服务端合并两页）
   const recordState = {
@@ -58,6 +64,7 @@ export function RecordsView(app) {
     error: "",
   };
 
+  if (reviewCard) root.append(reviewCard);
   root.append(
     scoreCard,
     sectionLabel("历史记录", "点击看详情 · 长按导入为路线"),
@@ -103,15 +110,52 @@ export function RecordsView(app) {
     if (ok) await doImport(recordId);
   }
 
+  function renderReview(canConfirm) {
+    if (!reviewCard || !pending) return;
+    const confirm = h("button", {
+      class: "btn btn-block",
+      text: "我已核对跑步记录",
+      disabled: !canConfirm,
+      onClick: async () => {
+        confirm.disabled = true;
+        try {
+          await api.runResolve(receiptOwner, pending.jobId);
+          reviewCard.remove();
+          await app.refresh();
+          toast("待确认状态已解除");
+        } catch (error) {
+          toast(error.message, "warn");
+          confirm.disabled = false;
+        }
+      },
+    });
+    reviewCard.replaceChildren(
+      h("div", { class: "card-head" }, [h("h3", { text: "上次提交待确认" })]),
+      h("div", { class: "card-body" }, [
+        h("p", {
+          class: "hint",
+          text: pending.recordId
+            ? "请核对记录 #" +
+              pending.recordId +
+              "，确认上次提交结果后再开始新任务。"
+            : "请先核对下方的近期记录，确认上次提交结果后再开始新任务。",
+        }),
+        confirm,
+      ]),
+    );
+  }
+
   async function load() {
     if (loading) return;
+    const requestedYear = year;
     loading = true;
     recordState.loadingMore = false;
     recordState.moreError = "";
     renderScore(null, true);
+    renderReview(false);
     renderList(true);
     try {
-      const res = await api.records(year, 1);
+      const res = await api.records(requestedYear, 1);
       if (Number(res.status) !== 1) {
         recordState.list = [];
         recordState.hasMore = false;
@@ -125,6 +169,11 @@ export function RecordsView(app) {
         recordState.total = Number(res.total) || recordState.list.length;
         renderScore(res.score, false, res.scoreError);
         renderList(false);
+        renderReview(
+          requestedYear === year &&
+            Number(requestedYear) === receiptYear &&
+            app.state.activeUid === receiptOwner,
+        );
       }
     } catch (e) {
       recordState.list = [];
