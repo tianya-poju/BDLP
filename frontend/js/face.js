@@ -1,9 +1,11 @@
+import { invoke } from "./ipc.js";
+
 /* 人脸照片处理（浏览器端）：归一化 / 随机化扰动 / 摄像头拍摄 / 内容指纹
  *
  * 为什么放在浏览器端：服务端零依赖，不做图像重编码；
  * Canvas 天然具备解码→变换→重编码能力，正好承载官方的 randomizeFaceImage 等价流程。
  */
-"use strict";
+("use strict");
 
 function loadImage(src) {
   return new Promise((resolve, reject) => {
@@ -110,6 +112,8 @@ export async function randomizePhoto(source) {
 
 /** 通过文件选择器取图 */
 export function pickImage() {
+  if (document.documentElement.classList.contains("android"))
+    return invoke("android_photo", { camera: false });
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
@@ -126,6 +130,8 @@ export function pickImage() {
  * @returns {Promise<Blob|null>}
  */
 export function captureFromCamera() {
+  if (document.documentElement.classList.contains("android"))
+    return invoke("android_photo", { camera: true });
   return new Promise(async (resolve) => {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       resolve(null);
