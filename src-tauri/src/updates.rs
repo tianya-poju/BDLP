@@ -1,7 +1,13 @@
 use serde::Serialize;
 use std::sync::Mutex;
+#[cfg(not(target_os = "android"))]
 const API: &str = "https://api.github.com/repos/tianya-poju/BDLP/releases/latest";
+#[cfg(not(target_os = "android"))]
 const PAGE: &str = "https://github.com/tianya-poju/BDLP/releases/latest";
+#[cfg(target_os = "android")]
+const ANDROID_API: &str = "https://api.github.com/repos/tianya-poju/BDLP/releases?per_page=20";
+#[cfg(any(target_os = "android", test))]
+const RELEASES_PAGE: &str = "https://github.com/tianya-poju/BDLP/releases";
 const LIMIT: usize = 256 * 1024;
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -9,22 +15,43 @@ pub struct Release {
     current_version: String,
     latest_version: Option<String>,
     status: String,
-    release_url: &'static str,
+    release_url: String,
 }
 impl Release {
-    fn empty() -> Self {
+    fn empty(current: &str, page: &str) -> Self {
         Self {
-            current_version: env!("CARGO_PKG_VERSION").into(),
+            current_version: current.into(),
             latest_version: None,
             status: "unpublished".into(),
-            release_url: PAGE,
+            release_url: page.into(),
         }
+    }
+
+    fn compare(
+        current: &str,
+        latest: semver::Version,
+        release_url: String,
+    ) -> Result<Self, crate::error::ApiError> {
+        let local = semver::Version::parse(current).map_err(|_| "本机版本信息异常")?;
+        Ok(Self {
+            current_version: current.into(),
+            latest_version: Some(latest.to_string()),
+            status: if latest.cmp_precedence(&local).is_gt() {
+                "available"
+            } else {
+                "current"
+            }
+            .into(),
+            release_url,
+        })
     }
 }
 #[derive(Default)]
 pub struct Checks {
     gate: tokio::sync::Mutex<()>,
     result: Mutex<(u64, Option<Result<Release, crate::error::ApiError>>)>,
+    #[cfg(target_os = "android")]
+    release_url: Mutex<Option<String>>,
 }
 impl Checks {
     async fn coalesce<F, Fut>(&self, fetch: F) -> Result<Release, crate::error::ApiError>
@@ -49,6 +76,7 @@ impl Checks {
         result
     }
 }
+#[cfg(not(target_os = "android"))]
 fn parse(bytes: &[u8], current: &str) -> Result<Release, crate::error::ApiError> {
     let value: serde_json::Value =
         serde_json::from_slice(bytes).map_err(|_| "GitHub 返回格式异常，请稍后重试")?;
@@ -56,26 +84,51 @@ fn parse(bytes: &[u8], current: &str) -> Result<Release, crate::error::ApiError>
         return Err("GitHub 返回格式异常，请稍后重试".into());
     }
     if value["draft"] == true || value["prerelease"] == true {
-        return Ok(Release::empty());
+        return Ok(Release::empty(current, PAGE));
     }
     let tag = value["tag_name"].as_str().ok_or("GitHub 版本信息缺失")?;
     let version = semver::Version::parse(tag.strip_prefix('v').unwrap_or(tag))
         .map_err(|_| "GitHub 版本号格式异常")?;
     if !version.pre.is_empty() {
-        return Ok(Release::empty());
+        return Ok(Release::empty(current, PAGE));
     }
-    let local = semver::Version::parse(current).map_err(|_| "本机版本信息异常")?;
-    Ok(Release {
-        current_version: current.into(),
-        latest_version: Some(version.to_string()),
-        status: if version.cmp_precedence(&local).is_gt() {
-            "available"
-        } else {
-            "current"
+    Release::compare(current, version, PAGE.into())
+}
+
+#[cfg(any(target_os = "android", test))]
+fn parse_android(bytes: &[u8], current: &str) -> Result<Release, crate::error::ApiError> {
+    let entries: Vec<serde_json::Value> =
+        serde_json::from_slice(bytes).map_err(|_| "GitHub 返回格式异常，请稍后重试")?;
+    let latest = entries
+        .iter()
+        .take(20)
+        .filter_map(|entry| {
+            if entry["draft"].as_bool() != Some(false)
+                || entry["prerelease"].as_bool() != Some(false)
+            {
+                return None;
+            }
+            let tag = entry["tag_name"].as_str()?;
+            let version = semver::Version::parse(tag.strip_prefix('v').unwrap_or(tag)).ok()?;
+            if !version.pre.is_empty() {
+                return None;
+            }
+            let filename = format!("BDLP-{version}-android-arm64.apk");
+            entry["assets"]
+                .as_array()?
+                .iter()
+                .any(|asset| {
+                    asset["name"].as_str() == Some(filename.as_str()) && asset["state"] == "uploaded"
+                })
+                .then_some((version, tag))
+        })
+        .max_by(|(left, _), (right, _)| left.cmp_precedence(right));
+    match latest {
+        Some((version, tag)) => {
+            Release::compare(current, version, format!("{RELEASES_PAGE}/tag/{tag}"))
         }
-        .into(),
-        release_url: PAGE,
-    })
+        None => Ok(Release::empty(current, RELEASES_PAGE)),
+    }
 }
 fn response_status(status: u16) -> Result<bool, crate::error::ApiError> {
     match status {
@@ -100,7 +153,7 @@ fn append_limited(bytes: &mut Vec<u8>, chunk: &[u8]) -> Result<(), crate::error:
     bytes.extend_from_slice(chunk);
     Ok(())
 }
-async fn fetch() -> Result<Release, crate::error::ApiError> {
+async fn fetch_bytes(api: &str) -> Result<Option<Vec<u8>>, crate::error::ApiError> {
     // Dedicated anonymous client: never reuse the account client's cookies or headers.
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
@@ -109,14 +162,14 @@ async fn fetch() -> Result<Release, crate::error::ApiError> {
         .build()
         .map_err(|_| "更新检查初始化失败")?;
     let mut response = client
-        .get(API)
+        .get(api)
         .header("Accept", "application/vnd.github+json")
         .header("X-GitHub-Api-Version", "2022-11-28")
         .send()
         .await
         .map_err(network_error)?;
     if !response_status(response.status().as_u16())? {
-        return Ok(Release::empty());
+        return Ok(None);
     }
     if response.content_length().is_some_and(|n| n > LIMIT as u64) {
         return Err("GitHub 更新响应过大，已停止读取".into());
@@ -125,20 +178,59 @@ async fn fetch() -> Result<Release, crate::error::ApiError> {
     while let Some(chunk) = response.chunk().await.map_err(network_error)? {
         append_limited(&mut bytes, &chunk)?;
     }
-    parse(&bytes, env!("CARGO_PKG_VERSION"))
+    Ok(Some(bytes))
 }
+
+#[cfg(not(target_os = "android"))]
+async fn fetch(current: &str) -> Result<Release, crate::error::ApiError> {
+    match fetch_bytes(API).await? {
+        Some(bytes) => parse(&bytes, current),
+        None => Ok(Release::empty(current, PAGE)),
+    }
+}
+
+#[cfg(target_os = "android")]
+async fn fetch(current: &str) -> Result<Release, crate::error::ApiError> {
+    match fetch_bytes(ANDROID_API).await? {
+        Some(bytes) => parse_android(&bytes, current),
+        None => Ok(Release::empty(current, RELEASES_PAGE)),
+    }
+}
+
 #[tauri::command]
 pub async fn update_check(
     checks: tauri::State<'_, Checks>,
+    app: tauri::AppHandle,
 ) -> Result<Release, crate::error::ApiError> {
     checks
         .coalesce(|| async {
-            tokio::time::timeout(std::time::Duration::from_secs(10), fetch())
+            let current = app.package_info().version.to_string();
+            let release = tokio::time::timeout(std::time::Duration::from_secs(10), fetch(&current))
                 .await
-                .map_err(|_| crate::error::ApiError::network("检查更新超时，请稍后重试"))?
+                .map_err(|_| crate::error::ApiError::network("检查更新超时，请稍后重试"))??;
+            #[cfg(target_os = "android")]
+            {
+                *checks.release_url.lock().map_err(|_| "更新检查状态不可用")? =
+                    Some(release.release_url.clone());
+            }
+            Ok(release)
         })
         .await
 }
+
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub async fn update_open(checks: tauri::State<'_, Checks>) -> Result<(), crate::error::ApiError> {
+    let url = checks
+        .release_url
+        .lock()
+        .map_err(|_| "更新检查状态不可用")?
+        .clone()
+        .unwrap_or_else(|| RELEASES_PAGE.into());
+    crate::android::open_update_page(&url).await
+}
+
+#[cfg(target_os = "windows")]
 #[tauri::command]
 pub fn update_open() -> Result<(), crate::error::ApiError> {
     use std::os::windows::ffi::OsStrExt;
@@ -175,7 +267,7 @@ pub fn update_open() -> Result<(), crate::error::ApiError> {
         Ok(())
     }
 }
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "android")))]
 mod tests {
     use super::*;
     fn release(tag: &str) -> Vec<u8> {
@@ -212,6 +304,45 @@ mod tests {
         }
     }
     #[test]
+    fn android_selects_highest_formal_release_with_an_uploaded_arm64_apk() {
+        let entries = serde_json::json!([
+            {"tag_name":"v1.10.0","draft":false,"prerelease":false,"assets":[
+                {"name":"BDLP-1.10.0-android-arm64.apk","state":"uploaded"}
+            ],"html_url":"https://untrusted.invalid"},
+            {"tag_name":"v2.0.0","draft":false,"prerelease":false,"assets":[
+                {"name":"BDLP-2.0.0-windows-x64-setup.exe","state":"uploaded"}
+            ]},
+            {"tag_name":"v1.9.0","draft":false,"prerelease":false,"assets":[
+                {"name":"BDLP-1.9.0-android-arm64.apk","state":"uploaded"}
+            ]},
+            {"tag_name":"v2.1.0","draft":false,"prerelease":true,"assets":[
+                {"name":"BDLP-2.1.0-android-arm64.apk","state":"uploaded"}
+            ]},
+            {"tag_name":"v2.2.0","draft":true,"prerelease":false,"assets":[
+                {"name":"BDLP-2.2.0-android-arm64.apk","state":"uploaded"}
+            ]},
+            {"tag_name":"v2.3.0","draft":false,"prerelease":false,"assets":[
+                {"name":"BDLP-2.3.0-android-arm64.apk","state":"starter"}
+            ]},
+            {"tag_name":"v2.4.0-beta.1","draft":false,"prerelease":false,"assets":[
+                {"name":"BDLP-2.4.0-beta.1-android-arm64.apk","state":"uploaded"}
+            ]}
+        ]);
+        let bytes = serde_json::to_vec(&entries).unwrap();
+        for (current, status) in [("1.1.2", "available"), ("1.10.0", "current")] {
+            let result = parse_android(&bytes, current).unwrap();
+            assert_eq!(result.status, status);
+            assert_eq!(result.latest_version.as_deref(), Some("1.10.0"));
+            assert_eq!(result.release_url, format!("{RELEASES_PAGE}/tag/v1.10.0"));
+        }
+        let windows_only = serde_json::to_vec(&vec![entries[1].clone(); 20]).unwrap();
+        let result = parse_android(&windows_only, "1.1.2").unwrap();
+        assert_eq!(result.status, "unpublished");
+        assert_eq!(result.release_url, RELEASES_PAGE);
+        assert!(parse_android(b"{}", "1.1.2").is_err());
+    }
+
+    #[test]
     fn concurrent_checks_share_success_or_failure_but_later_can_retry() {
         tauri::async_runtime::block_on(async {
             for fail in [false, true] {
@@ -229,7 +360,7 @@ mod tests {
                                 if fail {
                                     Err("timeout".into())
                                 } else {
-                                    Ok(Release::empty())
+                                    Ok(Release::empty("1.1.2", PAGE))
                                 }
                             })
                             .await
@@ -240,7 +371,7 @@ mod tests {
                 }
                 assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
                 assert!(state
-                    .coalesce(|| async { Ok(Release::empty()) })
+                    .coalesce(|| async { Ok(Release::empty("1.1.2", PAGE)) })
                     .await
                     .is_ok());
             }
@@ -281,7 +412,7 @@ mod tests {
     #[test]
     #[ignore]
     fn published_release_readonly() {
-        let r = tauri::async_runtime::block_on(fetch()).unwrap();
+        let r = tauri::async_runtime::block_on(fetch(env!("CARGO_PKG_VERSION"))).unwrap();
         assert_eq!(r.latest_version.as_deref(), Some(env!("CARGO_PKG_VERSION")));
         assert_eq!(r.status, "current");
         let response = reqwest::Client::new();
