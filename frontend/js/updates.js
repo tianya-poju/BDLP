@@ -68,7 +68,7 @@ export function createUpdateClient(call, notify = () => {}) {
 export const updates = createUpdateClient(invoke, (message) =>
   toast(message, "ok", 6000),
 );
-export function updateControls(version) {
+export function updateControls(version, android = false) {
   updates.version(version);
   const text = h("p", { class: "hint" }),
     check = h("button", {
@@ -97,7 +97,7 @@ export function updateControls(version) {
         : s.status === "current"
           ? `已是最新正式版本（GitHub：${s.latestVersion}）`
           : s.status === "unpublished"
-            ? "GitHub 暂无正式发行版本"
+            ? (android ? "GitHub 暂无正式 Android 版本" : "GitHub 暂无正式发行版本")
             : s.status === "error"
               ? s.error
               : "尚未检查更新";
