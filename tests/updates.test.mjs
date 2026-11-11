@@ -13,7 +13,8 @@ test('startup errors are quiet, manual retry works and browser target accepts no
 test('release version, compatibility and remote-window IPC policy stay aligned',()=>{
  const config=JSON.parse(fs.readFileSync(new URL('../src-tauri/tauri.conf.json',import.meta.url),'utf8')),pkg=JSON.parse(fs.readFileSync(new URL('../package.json',import.meta.url),'utf8'));
  const cargo=fs.readFileSync(new URL('../src-tauri/Cargo.toml',import.meta.url),'utf8');assert.equal(config.version,pkg.version);assert.match(cargo,new RegExp('version = "'+pkg.version.replaceAll('.','\\.')+'"'));assert.equal(config.bundle.windows.allowDowngrades,true);assert.equal(config.identifier,'cn.lepaopoju.desktop.dev');assert.equal(config.mainBinaryName,'budao-lepao');
- const main=fs.readFileSync(new URL('../src-tauri/src/main.rs',import.meta.url),'utf8');assert.ok(main.indexOf('ipc_policy::allowed')<main.indexOf('updates::update_check,'));assert.match(main,/updates::update_open,/);
+ const android=JSON.parse(fs.readFileSync(new URL('../src-tauri/tauri.android.conf.json',import.meta.url),'utf8'));assert.equal(android.version,pkg.version);assert.equal(android.identifier,'com.poju.budaolepao');assert.equal(android.bundle.android.versionCode,1001005);
+ const main=fs.readFileSync(new URL('../src-tauri/src/lib.rs',import.meta.url),'utf8');assert.ok(main.indexOf('ipc_policy::allowed')<main.indexOf('updates::update_check,'));assert.match(main,/updates::update_open,/);
  const settings=fs.readFileSync(new URL('../frontend/js/views/settings.js',import.meta.url),'utf8');assert.ok(!/不道乐跑 \d+\.\d+\.\d+/.test(settings));assert.match(settings,/s\.version/);
  const nsi=fs.readFileSync(new URL('../src-tauri/installer-template.nsi',import.meta.url),'utf8');assert.match(nsi,/\$R0 == -1\s+SendMessage \$R3 \$\{BM_SETCHECK\} \$\{BST_CHECKED\}/);
 });
