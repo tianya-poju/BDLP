@@ -284,7 +284,6 @@ impl Client {
     }
     fn save(&self) {
         let _ = (|| -> Result<(), crate::error::ApiError> {
-            use std::os::windows::ffi::OsStrExt;
             let b = crate::store::protect(
                 &serde_json::to_vec(&self.cache).map_err(|_| "缓存编码失败")?,
                 false,
@@ -293,16 +292,7 @@ impl Client {
                 .path
                 .with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
             std::fs::write(&tmp, b).map_err(|_| "缓存保存失败")?;
-            let from: Vec<u16> = tmp.as_os_str().encode_wide().chain(Some(0)).collect();
-            let to: Vec<u16> = self.path.as_os_str().encode_wide().chain(Some(0)).collect();
-            #[link(name = "kernel32")]
-            unsafe extern "system" {
-                fn MoveFileExW(a: *const u16, b: *const u16, f: u32) -> i32;
-            }
-            if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), 9) } == 0 {
-                return Err("缓存替换失败".into());
-            }
-            Ok(())
+            crate::store::replace_file(&tmp, &self.path)
         })();
     }
 }
