@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 test('registry restore coalesces events and ignores late reads and late listener registration after detach',async()=>{
- let event,finishRead,finishListen,calls=0,unlistens=0;const states=[];
- globalThis.window={__TAURI__:{core:{invoke:async cmd=>{assert.equal(cmd,'run_current');calls++;return new Promise(r=>finishRead=r);}},event:{listen:async(name,callback)=>{assert.equal(name,'job-updated');event=callback;return new Promise(r=>finishListen=r);}}}};
- const {subscribeCurrentRun}=await import('../frontend/js/run-client.js');const off=subscribeCurrentRun(s=>states.push(s));event();event();assert.equal(calls,1);finishRead({uid:'a',current:{id:'job'}});await new Promise(r=>setImmediate(r));assert.equal(calls,2);assert.equal(states.length,1);
- off();finishRead({uid:'a',current:{id:'late'}});finishListen(()=>unlistens++);await new Promise(r=>setImmediate(r));assert.equal(states.length,1);assert.equal(unlistens,1);
+ let event,resume,finishRead,finishListen,calls=0,unlistens=0;const states=[];
+ globalThis.window={addEventListener:(name,callback)=>{assert.equal(name,'bdlp-android-resume');resume=callback;},removeEventListener:(name,callback)=>{assert.equal(name,'bdlp-android-resume');assert.equal(callback,resume);resume=null;},__TAURI__:{core:{invoke:async cmd=>{assert.equal(cmd,'run_current');calls++;return new Promise(r=>finishRead=r);}},event:{listen:async(name,callback)=>{assert.equal(name,'job-updated');event=callback;return new Promise(r=>finishListen=r);}}}};
+ const {subscribeCurrentRun}=await import('../frontend/js/run-client.js');const off=subscribeCurrentRun(s=>states.push(s));event();resume();assert.equal(calls,1);finishRead({uid:'a',current:{id:'job'}});await new Promise(r=>setImmediate(r));assert.equal(calls,2);assert.equal(states.length,1);
+ off();assert.equal(resume,null);finishRead({uid:'a',current:{id:'late'}});finishListen(()=>unlistens++);await new Promise(r=>setImmediate(r));assert.equal(states.length,1);assert.equal(unlistens,1);
 });
 test('detaching and returning restores accumulated progress without cancelling task',async()=>{
  let status={status:'running',logs:['准备','心跳'],result:{}};let cancels=0;
