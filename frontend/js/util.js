@@ -162,6 +162,7 @@ export function openModal({
   let closed = false;
   const esc = (e) => {
     if (e.key === "Escape" && modalStack.at(-1) === overlay) {
+      e.preventDefault();
       e.stopImmediatePropagation();
       close();
     }
