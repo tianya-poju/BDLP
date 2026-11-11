@@ -3,15 +3,18 @@ use std::{
     io::{self, Write},
     path::{Path, PathBuf},
 };
+#[cfg(windows)]
 pub fn beside(exe: &Path) -> io::Result<PathBuf> {
     Ok(exe
         .parent()
         .ok_or_else(|| io::Error::other("无法确定安装目录"))?
         .join("data"))
 }
+#[cfg(windows)]
 pub fn root() -> io::Result<PathBuf> {
     beside(&std::env::current_exe()?)
 }
+#[cfg(windows)]
 pub fn startup_error(message: &str) {
     #[link(name = "user32")]
     unsafe extern "system" {
@@ -31,6 +34,28 @@ pub fn startup_error(message: &str) {
         MessageBoxW(std::ptr::null_mut(), body.as_ptr(), title.as_ptr(), 0x10);
     }
 }
+#[cfg(target_os = "android")]
+static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+#[cfg(target_os = "android")]
+pub fn initialize(app: &tauri::App) -> tauri::Result<()> {
+    use tauri::Manager;
+    let _ = ROOT.set(app.path().app_local_data_dir()?);
+    Ok(())
+}
+
+#[cfg(target_os = "android")]
+pub fn root() -> io::Result<PathBuf> {
+    ROOT.get()
+        .cloned()
+        .ok_or_else(|| io::Error::other("本机数据目录未初始化"))
+}
+
+#[cfg(target_os = "android")]
+pub fn startup_error(message: &str) {
+    panic!("无法启动不道乐跑：{message}");
+}
+
 pub fn prepare(root: &Path) -> io::Result<()> {
     let probe = root.join(format!(".write-check-{}", uuid::Uuid::new_v4()));
     let result = (|| {
@@ -44,9 +69,11 @@ pub fn prepare(root: &Path) -> io::Result<()> {
         drop(f);
         fs::remove_file(&probe)
     })();
-    result.map_err(|_: io::Error| {
-        io::Error::other("安装目录不可写，请将软件安装到当前用户可写的位置；数据不会回退到 AppData")
-    })
+    #[cfg(windows)]
+    let message = "安装目录不可写，请将软件安装到当前用户可写的位置；数据不会回退到 AppData";
+    #[cfg(target_os = "android")]
+    let message = "应用私有数据目录不可写";
+    result.map_err(|_: io::Error| io::Error::other(message))
 }
 #[cfg(test)]
 mod tests {
