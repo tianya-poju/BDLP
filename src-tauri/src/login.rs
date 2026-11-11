@@ -138,8 +138,9 @@ fn validate(active: Option<&Attempt>, id: &str, platform: &str, d: &Data) -> Res
 pub fn login_begin(id: String, platform: String, app: tauri::AppHandle) -> Result<(), ApiError> {
     app.state::<Attempts>()
         .begin(&id, &platform, &app.state::<Store>(), &app.state::<Runs>())?;
-    // Destroy the superseded QQ surface. Each attempt has its own label, so an old
+    // Destroy the superseded desktop QQ surface. Each attempt has its own label, so an old
     // window or callback can never close a newer authorization window.
+    #[cfg(desktop)]
     for (label, w) in app.webview_windows() {
         if label.starts_with("qq-login-") {
             let _ = w.close();
@@ -151,6 +152,7 @@ pub fn login_begin(id: String, platform: String, app: tauri::AppHandle) -> Resul
 pub fn login_cancel(id: String, app: tauri::AppHandle) -> Result<(), ApiError> {
     uuid::Uuid::parse_str(&id).map_err(|_| ApiError::invalid("登录尝试编号无效"))?;
     app.state::<Attempts>().cancel(&id)?;
+    #[cfg(desktop)]
     if let Some(w) = app.get_webview_window(&format!("qq-login-{id}")) {
         let _ = w.close();
     }
@@ -165,7 +167,7 @@ pub(crate) fn qq_credentials(url: &url::Url) -> Result<Option<(String, String)>,
             && url.path() == "/open/connect/widget/mobile/login/proxy.htm"
             || url.scheme() == "auth"
                 && url.host_str() == Some("tauth.qq.com")
-                && url.path() == "/");
+                && matches!(url.path(), "" | "/"));
     let mut pairs = std::collections::BTreeMap::new();
     for (k, v) in url.query_pairs().chain(
         url.fragment()
