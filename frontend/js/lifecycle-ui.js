@@ -63,18 +63,23 @@ export function installLifecycle(app) {
       if (e.kind !== "network") toast(e.message, "warn");
     }
   };
-  window.__TAURI__.event.listen("close-requested", closeDialog);
-  window.__TAURI__.event.listen("window-restored", check);
-  window.__TAURI__.event.listen("show-task", async () => {
-    await app.refresh();
-    app.navigate("console");
-  });
+  if (app.android) {
+    window.addEventListener("bdlp-android-resume", check);
+  } else {
+    window.__TAURI__.event.listen("close-requested", closeDialog);
+    window.__TAURI__.event.listen("window-restored", check);
+    window.__TAURI__.event.listen("show-task", async () => {
+      await app.refresh();
+      app.navigate("console");
+    });
+  }
   window.addEventListener("account-expired", async () => {
     await invoke("session_check").catch(() => {});
     await app.refresh();
   });
   setInterval(check, 300000);
   check();
+  if (app.android) return;
   app.windowSettingsCard = () => {
     const select = h(
       "select",
