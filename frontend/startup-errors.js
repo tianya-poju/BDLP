@@ -20,3 +20,5 @@ window.addEventListener("unhandledrejection", (e) => {
   p.textContent = "操作失败：" + String(e.reason);
   document.querySelector("#view")?.append(p);
 });
+if (/Android/i.test(navigator.userAgent))
+  document.documentElement.classList.add("android");
