@@ -338,6 +338,7 @@ pub(crate) async fn finish(
     app.state::<crate::login::Attempts>().commit(attempt_id,platform,&store,&app.state::<crate::running::Runs>(),|v|{crate::accounts::save_active(v);if let Some(existing)=v.profiles.get(&uid).cloned(){if existing.school_id==d.school_id{v.route=existing.route;v.zone=existing.zone;}else{v.route.clear();v.zone=Default::default();}v.run_config=existing.run_config;d.account.label=existing.account.label.clone();}else{v.route.clear();v.zone=Default::default();v.run_config=Default::default();}let entry=json!({"id":d.device_id,"model":crate::store::device_view(&d)["model"],"osVersion":crate::store::device_view(&d)["osVersion"],"uid":uid,"time":SystemTime::now().duration_since(UNIX_EPOCH).map(|t|t.as_millis() as u64).unwrap_or(0)});v.device_history.retain(|h|h["id"]!=entry["id"]);v.device_history.insert(0,entry);v.device_history.truncate(6);v.device_id=d.device_id;v.device=d.device;v.pending_device=Default::default();v.account=d.account;v.school_id=d.school_id;v.school_name=d.school_name;Ok(())})?;
     Ok(())
 }
+#[cfg(desktop)]
 #[tauri::command]
 pub async fn qq_login_start(
     attempt_id: String,
@@ -422,6 +423,86 @@ pub async fn qq_login_start(
         let _ = window.close();
         return Err(crate::error::ApiError::cancelled());
     }
+    Ok(())
+}
+
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub async fn qq_login_start(
+    attempt_id: String,
+    app: tauri::AppHandle,
+) -> Result<(), crate::error::ApiError> {
+    let store = app.state::<Store>();
+    let attempts = app.state::<crate::login::Attempts>();
+    attempts.check(&attempt_id, "qq", &store)?;
+    crate::running::ensure_idle(&app.state::<crate::running::Runs>())?;
+    let monitor = app.clone();
+    let id = attempt_id.clone();
+    let (done, mut finished) = tokio::sync::oneshot::channel();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            if !matches!(
+                finished.try_recv(),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+            ) {
+                break;
+            }
+            if monitor
+                .state::<crate::login::Attempts>()
+                .check(&id, "qq", &monitor.state::<Store>())
+                .is_err()
+            {
+                crate::android::close_page("qq", id);
+                break;
+            }
+        }
+    });
+    tauri::async_runtime::spawn(async move {
+        let attempts = app.state::<crate::login::Attempts>();
+        if attempts
+            .check(&attempt_id, "qq", &app.state::<Store>())
+            .is_err()
+        {
+            return;
+        }
+        let result = crate::android::open_qq(&attempt_id, &cfg().qq_url).await;
+        let _ = done.send(());
+        if attempts
+            .check(&attempt_id, "qq", &app.state::<Store>())
+            .is_err()
+        {
+            return;
+        }
+        let result = match result {
+            Ok(reply) => match reply.callback {
+                Some(callback) => match url::Url::parse(&callback)
+                    .ok()
+                    .map(|url| crate::login::qq_credentials(&url))
+                {
+                    Some(Ok(Some((account, token)))) => {
+                        let _ = app.emit_to("main", "qq-login-confirmed", &attempt_id);
+                        finish(app.clone(), account, token, "2", &attempt_id).await
+                    }
+                    _ => Err(crate::error::ApiError::invalid("QQ 授权回调无效")),
+                },
+                None => Err(match reply.phase.as_str() {
+                    "timeout" => "QQ 授权已超时，请重新扫码".into(),
+                    "failed" => "QQ 授权页加载失败，请重试".into(),
+                    _ => crate::error::ApiError::cancelled(),
+                }),
+            },
+            Err(error) => Err(error),
+        };
+        if result.is_err() {
+            attempts.cancel_pending(&attempt_id);
+        }
+        let payload = match result {
+            Ok(()) => json!({"ok":true,"attemptId":attempt_id}),
+            Err(e) => json!({"ok":false,"attemptId":attempt_id,"error":e.message}),
+        };
+        let _ = app.emit_to("main", "login-result", payload);
+    });
     Ok(())
 }
 
