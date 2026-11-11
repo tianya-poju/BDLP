@@ -101,9 +101,11 @@ export function subscribeCurrentRun(onState) {
       else unlisten = fn;
     })
     .catch(() => {});
+  window.addEventListener("bdlp-android-resume", check);
   void check();
   return () => {
     stopped = true;
+    window.removeEventListener("bdlp-android-resume", check);
     unlisten?.();
   };
 }
