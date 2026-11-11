@@ -90,13 +90,15 @@ pub fn run_current(
         .rev()
         .find(|j| j.data.account.uid.clone() == uid)
         .map(|j| json!({"id":j.id,"mode":j.mode}));
+    let pending = cfg!(target_os = "android") && current.is_none() && pending_receipt(&d);
     Ok(
-        json!({"uid":uid,"current":current,"latest":latest,"pending":false,"receipt":receipt(&d),"receiptHistory":d.receipt_history.get(&uid).cloned().unwrap_or_default()}),
+        json!({"uid":uid,"current":current,"latest":latest,"pending":pending,"receipt":receipt(&d),"receiptHistory":d.receipt_history.get(&uid).cloned().unwrap_or_default()}),
     )
 }
 #[tauri::command]
 pub fn run_resolve(
     uid: String,
+    job_id: Option<String>,
     store: tauri::State<Store>,
     runs: tauri::State<Runs>,
 ) -> Result<(), crate::error::ApiError> {
@@ -108,8 +110,11 @@ pub fn run_resolve(
         if uid != d.account.uid.clone() {
             return Err("账号已切换".into());
         }
-        if pending_receipt(d) {
-            if let Some(r) = d.run_receipts.get_mut(&uid) {
+        if let Some(r) = d.run_receipts.get_mut(&uid) {
+            if cfg!(target_os = "android") && job_id.as_deref() != Some(r.job_id.as_str()) {
+                return Err("待确认回执已变化，请刷新记录".into());
+            }
+            if r.status == ReceiptStatus::Pending {
                 r.status = ReceiptStatus::Reviewed;
             }
         }
@@ -131,6 +136,9 @@ pub fn run_open(
     let mut d = snapshot(&store)?;
     if uid != d.account.uid.clone() || d.account.token.clone().is_empty() {
         return Err("账号已变化，请刷新后重试".into());
+    }
+    if cfg!(target_os = "android") && pending_receipt(&d) {
+        return Err("上次提交待确认，请先到跑步记录核对".into());
     }
     d.run_config = run_config(&d.run_config)?;
     if d.school_id.parse::<u32>().ok().filter(|v| *v > 0).is_none() {
