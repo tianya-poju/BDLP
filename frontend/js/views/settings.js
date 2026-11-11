@@ -148,7 +148,9 @@ export function SettingsView(app) {
               }
             },
           }),
-          h("div", {}, [kv("数据保护", "Windows 当前用户加密")]),
+          app.android
+            ? null
+            : h("div", {}, [kv("数据保护", "Windows 当前用户加密")]),
         ]),
       ]),
     );
@@ -251,13 +253,13 @@ export function SettingsView(app) {
       ]),
     );
     if (app.windowSettingsCard) root.appendChild(app.windowSettingsCard());
-    aboutUpdates = updateControls(s.version);
+    aboutUpdates = updateControls(s.version, app.android);
     root.appendChild(
       h("div", { class: "card about-card" }, [
         h("div", { class: "card-head" }, [h("h3", { text: "关于" })]),
         h("div", { class: "card-body" }, [
           h("p", { text: `不道乐跑 ${s.version || "读取中"} · 作者：破局` }),
-          aboutUpdates.el,
+          aboutUpdates?.el,
           h("p", {
             class: "hint danger",
             text: "仅供学习研究，请遵守学校规定与平台协议。",
