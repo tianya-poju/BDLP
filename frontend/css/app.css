@@ -2620,3 +2620,31 @@ details.fold details.fold {
   flex: 1;
   min-width: 140px;
 }
+
+/* Android uses the same views with fixed, touch-sized navigation. */
+.tabbar.android-tabs {
+  display: none;
+}
+.android .tabbar.android-tabs {
+  display: grid;
+}
+.android .app-rail,
+.android .app-aside {
+  display: none;
+}
+.android .app-main {
+  padding-bottom: calc(var(--tabbar-h) + var(--safe-b) + var(--sp-5));
+}
+.android .tabbar button {
+  min-width: 0;
+  font-size: 11px;
+}
+.android .map,
+.android .map-wrap {
+  touch-action: none;
+}
+.android .fullpage-head .btn-icon,
+.android .modal-head .btn-icon {
+  min-width: 44px;
+  min-height: 44px;
+}
