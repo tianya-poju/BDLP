@@ -173,10 +173,14 @@ export class RouteEditorMap {
 
   #bind() {
     const map = this.map;
+    const isControl = (target) =>
+      target?.closest?.(
+        'button, a, [role="button"], [class*="amap-control"], [class*="amap-toolbar"]',
+      );
 
     // 点击加点（浏览模式）
     map.on("click", (e) => {
-      if (this.mode !== "browse") return;
+      if (this.mode !== "browse" || isControl(e.originEvent?.target)) return;
       this.points.push([+e.latlng.lat.toFixed(6), +e.latlng.lng.toFixed(6)]);
       this.redraw(false);
       this.onChange(this.points);
@@ -213,6 +217,7 @@ export class RouteEditorMap {
     };
 
     const onDown = (e) => {
+      if (isControl(e.target)) return;
       activePointers.add(e.pointerId);
       if (activePointers.size > 1) {
         abortStroke();
@@ -245,7 +250,7 @@ export class RouteEditorMap {
       this.onChange(this.points, { live: true }); // 只刷统计文字，避免每帧重建面板
     };
     const onUp = (e) => {
-      activePointers.delete(e.pointerId);
+      if (!activePointers.delete(e.pointerId)) return;
       if (!drawing) return;
       // 双指缩放中先抬起一根手指：不结束这一笔，等真正抬手
       if (activePointers.size > 0) return;
