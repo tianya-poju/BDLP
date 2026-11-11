@@ -54,6 +54,7 @@ export function createLoginClient(
     start,
     cancel,
     revision: () => revision,
+    isCurrent: (id) => current?.id === id,
     finish(payload) {
       if (!current || current.id !== payload?.attemptId) return false;
       current = null;
