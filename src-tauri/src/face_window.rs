@@ -56,12 +56,14 @@ pub async fn open(
     // Window creation must run outside a synchronous Tauri command on Windows.
     let _gate = registration.gate.lock().await;
     let identity = owner(store)?;
+    #[cfg(desktop)]
     let old = registration
         .page
         .lock()
         .map_err(|_| "注册窗口状态不可用")?
         .as_ref()
         .map(|p| (p.owner.clone(), p.status.clone()));
+    #[cfg(desktop)]
     if let Some((who, status)) = old {
         if let Some(w) = app.get_webview_window(&status.id) {
             if who == identity && status.phase != "timeout" && status.phase != "failed" {
@@ -90,60 +92,106 @@ pub async fn open(
         .append_pair("login_type", "1")
         .append_pair("token", d.account.token.as_str())
         .append_pair("uid", &crate::accounts::uid(&d));
-    let handle = app.clone();
-    let label = id.clone();
-    let result = tauri::WebviewWindowBuilder::new(&app, &id, tauri::WebviewUrl::External(url))
-        .data_directory(
-            crate::data_root::root()
-                .map_err(|_| "数据目录不可用")?
-                .join("webview/face-registration")
-                .join(&identity),
-        )
-        .title("不道乐跑 · 人脸信息")
-        .inner_size(650., 760.)
-        .on_navigation(|u| u.scheme() == "https" && u.host_str() == Some("api2.lptiyu.com"))
-        .on_page_load(move |_, payload| {
-            if payload.url().host_str() == Some("api2.lptiyu.com")
-                && matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
-            {
-                update(&handle, &label, "loaded");
+    #[cfg(desktop)]
+    {
+        let handle = app.clone();
+        let label = id.clone();
+        let result = tauri::WebviewWindowBuilder::new(&app, &id, tauri::WebviewUrl::External(url))
+            .data_directory(
+                crate::data_root::root()
+                    .map_err(|_| "数据目录不可用")?
+                    .join("webview/face-registration")
+                    .join(&identity),
+            )
+            .title("不道乐跑 · 人脸信息")
+            .inner_size(650., 760.)
+            .on_navigation(|u| u.scheme() == "https" && u.host_str() == Some("api2.lptiyu.com"))
+            .on_page_load(move |_, payload| {
+                if payload.url().host_str() == Some("api2.lptiyu.com")
+                    && matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
+                {
+                    update(&handle, &label, "loaded");
+                }
+            })
+            .build();
+        let window = match result {
+            Ok(w) => w,
+            Err(_) => {
+                update(&app, &id, "failed");
+                return Err("注册窗口创建失败，请关闭后重试".into());
             }
-        })
-        .build();
-    let window = match result {
-        Ok(w) => w,
-        Err(_) => {
+        };
+        if owner(store).ok().as_ref() != Some(&identity) {
+            let _ = window.close();
             update(&app, &id, "failed");
-            return Err("注册窗口创建失败，请关闭后重试".into());
+            return Err("账号已改变，请重新打开注册页".into());
         }
-    };
-    if owner(store).ok().as_ref() != Some(&identity) {
-        let _ = window.close();
-        update(&app, &id, "failed");
-        return Err("账号已改变，请重新打开注册页".into());
+        update(&app, &id, "loading");
+        let monitor = app.clone();
+        let monitor_id = id.clone();
+        tauri::async_runtime::spawn(async move {
+            let started = std::time::Instant::now();
+            let mut warned = false;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                let Some(w) = monitor.get_webview_window(&monitor_id) else {
+                    break;
+                };
+                if owner(&monitor.state::<Store>()).ok().as_ref() != Some(&identity) {
+                    let _ = w.close();
+                    update(&monitor, &monitor_id, "failed");
+                    break;
+                }
+                if !warned && started.elapsed().as_secs() >= 15 {
+                    update(&monitor, &monitor_id, "timeout");
+                    warned = true;
+                }
+            }
+        });
     }
-    update(&app, &id, "loading");
-    let monitor = app.clone();
-    let monitor_id = id.clone();
-    tauri::async_runtime::spawn(async move {
-        let started = std::time::Instant::now();
-        let mut warned = false;
-        loop {
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            let Some(w) = monitor.get_webview_window(&monitor_id) else {
-                break;
-            };
-            if owner(&monitor.state::<Store>()).ok().as_ref() != Some(&identity) {
-                let _ = w.close();
-                update(&monitor, &monitor_id, "failed");
-                break;
-            }
-            if !warned && started.elapsed().as_secs() >= 15 {
-                update(&monitor, &monitor_id, "timeout");
-                warned = true;
-            }
+    #[cfg(target_os = "android")]
+    {
+        update(&app, &id, "loading");
+        if let Err(error) = crate::android::open_face(&id, url.as_str()).await {
+            update(&app, &id, "failed");
+            return Err(error);
         }
-    });
+        let monitor = app.clone();
+        let monitor_id = id.clone();
+        tauri::async_runtime::spawn(async move {
+            let started = std::time::Instant::now();
+            let mut previous = "loading".to_owned();
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                let registration = monitor.state::<Registration>();
+                let active = registration.page.lock().ok().is_some_and(|p| {
+                    p.as_ref().is_some_and(|p| {
+                        p.status.id == monitor_id
+                            && p.owner == identity
+                            && !matches!(p.status.phase.as_str(), "closed" | "failed")
+                    })
+                });
+                if !active {
+                    break;
+                }
+                if owner(&monitor.state::<Store>()).ok().as_ref() != Some(&identity) {
+                    update(&monitor, &monitor_id, "failed");
+                    crate::android::close_page("face", monitor_id);
+                    break;
+                }
+                let mut phase = crate::android::face_phase(&monitor_id)
+                    .await
+                    .unwrap_or_else(|_| "failed".into());
+                if phase == "loading" && started.elapsed().as_secs() >= 15 {
+                    phase = "timeout".into();
+                }
+                if phase != previous {
+                    update(&monitor, &monitor_id, &phase);
+                    previous = phase;
+                }
+            }
+        });
+    }
     registration
         .page
         .lock()
