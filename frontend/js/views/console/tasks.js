@@ -16,6 +16,7 @@ export function createTasks({ app, uploadCard, logPanel, goAlipay }) {
     if (globalThis.LEPAO_TRIAL) return;
     const cfg = app.state.runConfig;
     const r = app.state.route;
+    const pending = app.state.running?.pending;
     uploadCard.innerHTML = "";
     uploadCard.append(
       h(
@@ -72,11 +73,19 @@ export function createTasks({ app, uploadCard, logPanel, goAlipay }) {
             class: "hint",
             text: "点击上传将启动联网任务，上传路线、统计数据及学校要求的本人照片。成绩以服务端返回和记录页复查为准。",
           }),
+          pending
+            ? h("button", {
+                class: "btn btn-block",
+                text: "上次提交待确认 · 查看跑步记录",
+                onClick: () => app.navigate("records"),
+              })
+            : null,
           h(
             "button",
             {
               class: "btn btn-primary btn-lg btn-block",
-              disabled: starting || Boolean(runJob) || r.points.length < 2,
+              disabled:
+                starting || Boolean(runJob) || pending || r.points.length < 2,
               title: "主动启动后将向乐跑服务提交记录",
               onClick: () => startRun(),
             },
@@ -150,7 +159,7 @@ export function createTasks({ app, uploadCard, logPanel, goAlipay }) {
     });
   }
   async function startRun() {
-    if (!alive() || runJob || starting) return;
+    if (!alive() || runJob || starting || app.state.running?.pending) return;
     starting = true;
     renderUpload();
     try {
@@ -182,7 +191,10 @@ export function createTasks({ app, uploadCard, logPanel, goAlipay }) {
       stopRegistry?.();
       stopRegistry = subscribeJobs((state) => {
         if (!alive() || state.uid !== ownerUid) return;
+        const pendingChanged =
+          Boolean(state.pending) !== Boolean(app.state.running?.pending);
         app.state.running = state;
+        if (pendingChanged) renderUpload();
         if (state.current && state.current.id !== runJob) {
           runJob = state.current.id;
           watchRun(runJob);
