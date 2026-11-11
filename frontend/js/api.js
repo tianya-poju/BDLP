@@ -100,7 +100,7 @@ const endpoints = {
     return startRun({ ...params, uid: state.activeUid });
   },
   runCancel: cancelRun,
-  runResolve: (uid) => invoke("run_resolve", { uid }),
+  runResolve: (uid, jobId) => invoke("run_resolve", { uid, jobId }),
   previewRoute: (points, config, rules = null) =>
     calculatePreview("route", points, config, rules),
   simulateSensor: (config) => calculatePreview("sensor", config),
