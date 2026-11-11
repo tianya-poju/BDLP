@@ -4,6 +4,7 @@ import { installLifecycle } from "./js/lifecycle-ui.js";
 
 import { h, svg, toast, openModal, choiceDialog } from "./js/util.js";
 import { api } from "./js/api.js";
+import { invoke } from "./js/ipc.js";
 import { LoginView } from "./js/views/login.js";
 import { ConsoleView } from "./js/views/console.js";
 import { RecordsView } from "./js/views/records.js";
@@ -11,7 +12,10 @@ import { SettingsView } from "./js/views/settings.js";
 import { openSchoolPicker, openAccountSwitcher } from "./js/components.js";
 import { TrackMap } from "./js/map.js";
 
+const android = document.documentElement.classList.contains("android");
+
 const app = {
+  android,
   navigate: (name) => show(name),
   state: null,
   current: "console",
@@ -70,7 +74,7 @@ async function refresh() {
     app.state.account.nickname ||
     app.state.account.uid ||
     "未登录";
-  refreshAside();
+  if (!android) refreshAside();
 }
 app.refresh = async () => {
   const oldUid = app.state?.activeUid;
@@ -131,6 +135,35 @@ function login() {
 }
 app.openAddAccount = login;
 installLifecycle(app);
+if (android) {
+  window.bdlpAndroidBack = () => {
+    if (
+      !document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", cancelable: true }),
+      )
+    )
+      return true;
+    const back = [
+      ...document.querySelectorAll('.fullpage-head button[aria-label="返回"]'),
+    ].at(-1);
+    if (back) {
+      back.click();
+      return true;
+    }
+    if (app.current !== "console") {
+      show("console");
+      return true;
+    }
+    return false;
+  };
+}
+if (android) {
+  window.__TAURI__.event
+    .listen("qq-login-confirmed", ({ payload }) => {
+      if (logins.isCurrent(payload)) toast("QQ 已确认，正在登录…");
+    })
+    .catch(() => {});
+}
 window.__TAURI__.event
   .listen("login-result", async ({ payload }) => {
     if (!logins.finish(payload)) return;
@@ -199,21 +232,32 @@ for (const b of document.querySelectorAll("[data-page]"))
     else if (b.dataset.page === "account") openAccountSwitcher(app);
     else show(b.dataset.page);
   };
+function finishFirstPage() {
+  if (android) void invoke("android_first_page_ready").catch(() => {});
+}
+
 refresh()
   .then(async () => {
     show("console");
+    finishFirstPage();
     if (app.state.loggedIn) {
       try {
         await api.refreshProfile();
         await api.zoneConfig(true);
-        await refresh();
-        show("console");
+        if (android) await app.refresh();
+        else {
+          await refresh();
+          show("console");
+        }
       } catch (e) {
         toast(`联网读取失败：${String(e)}`, "warn");
       }
     }
   })
-  .catch((e) => (root.textContent = `本地数据读取失败：${String(e)}`));
+  .catch((e) => {
+    root.textContent = `本地数据读取失败：${String(e)}`;
+    finishFirstPage();
+  });
 
 // Independent background check: never wait for GitHub before rendering or logging in.
 updates.startup();
